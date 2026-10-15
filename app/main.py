@@ -1,6 +1,7 @@
 """HTTP API + static web UI."""
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import shutil
@@ -10,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -295,9 +296,21 @@ def download(jid: str, bilingual: bool | None = None):
         "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
 
 
+def _versioned_index() -> str:
+    """index.html with ?v=<content hash> on the CSS/JS links, so a new image is never served with stale assets."""
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    for name in ("style.css", "app.js"):
+        v = hashlib.sha1((STATIC / name).read_bytes()).hexdigest()[:10]
+        html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")
+    return html
+
+
+INDEX_HTML = _versioned_index()
+
+
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

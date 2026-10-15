@@ -73,4 +73,40 @@ tr.user td.en::after { content: " ✎"; color: var(--accent); font-weight: 400; 
 .seg.pending .tgt { color: var(--muted); font-style: italic; }
 .seg textarea { margin-top: 6px; }
 .pager { display: flex; gap: 6px; justify-content: center; margin-top: 10px; }
-@media (max-width: 700px) { .seg { grid-template-columns: 1fr; } .top { flex-wrap: wrap; } }
+
+/* ---------------------------------------------------------------- phones */
+@media (max-width: 720px) {
+  main { padding: 10px; }
+  .top { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
+  .brand .muted { display: none; }
+  .card { padding: 12px; border-radius: 10px; }
+  h2 { font-size: 17px; }
+  input, select, textarea, button { font-size: 16px; }          /* no iOS zoom-in on focus */
+  button { min-height: 40px; }
+  .drop { padding: 20px 12px; }
+  #upload { width: 100%; }
+  .actions button { flex: 1 1 100%; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 13px; }
+  .tabs { gap: 2px; scrollbar-width: none; }
+  .tabs button { white-space: nowrap; padding: 7px 10px; font-size: 14px; }
+  .row.wrap > input { flex: 1 1 100%; }
+  .row.wrap > select, .row.wrap > button { flex: 1 1 auto; }
+  .row.wrap > .grow { display: none; }
+  .seg { grid-template-columns: 1fr; gap: 6px; }
+  .seg .src { font-size: 13px; }
+  .job { grid-template-columns: 1fr; }
+
+  /* glossary: one card per term instead of an 11-column table */
+  .table-wrap { overflow: visible; }
+  #g-table, #g-table tbody, #g-table tr, #g-table td { display: block; width: 100%; }
+  #g-table thead { display: none; }
+  #g-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  #g-table td { border: 0; padding: 0; }
+  #g-table td::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
+  #g-table td.en { grid-column: 1 / -1; font-size: 16px; white-space: normal; }
+  #g-table td.en::before, #g-table td.del-cell::before, #g-table td.nochar { display: none; }
+  #g-table td input[type=text], #g-table td select { width: 100%; min-width: 0 !important; max-width: none; }
+  #g-table td.count-cell { display: none; }
+  #g-table td.del-cell { grid-column: 1 / -1; text-align: right; }
+}
+

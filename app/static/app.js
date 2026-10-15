@@ -219,19 +219,19 @@ function renderGlossary() {
   tb.innerHTML = rows.map(([g, i]) => {
     const person = g.type === "person";
     const ch = person ? `
-      <td>${sel("gender", g.gender || "", GENDERS)}</td>
-      <td>${sel("particle", g.particle || "", PARTICLES)}</td>
-      <td>${txt("self_pronoun", g.self_pronoun, "ฉัน/ผม/ข้า", 70)}</td>
-      <td>${txt("role", g.role, "เช่น จักรพรรดิ", 110)}</td>
-      <td>${txt("addressed_as", g.addressed_as, "เช่น ราชาศัพท์", 90)}</td>` : `<td colspan="5" class="muted small">—</td>`;
+      <td data-label="เพศ">${sel("gender", g.gender || "", GENDERS)}</td>
+      <td data-label="คำลงท้าย">${sel("particle", g.particle || "", PARTICLES)}</td>
+      <td data-label="แทนตัว">${txt("self_pronoun", g.self_pronoun, "ฉัน/ผม/ข้า", 70)}</td>
+      <td data-label="บทบาท">${txt("role", g.role, "เช่น จักรพรรดิ", 110)}</td>
+      <td data-label="คนอื่นเรียก">${txt("addressed_as", g.addressed_as, "เช่น ราชาศัพท์", 90)}</td>` : `<td colspan="5" class="muted small nochar">—</td>`;
     return `
     <tr data-i="${i}" class="${g.source === "user" ? "user" : ""}">
-      <td class="en" title="${esc(g.example || "")}">${g.isNew ? `<input type="text" data-k="en" value="${esc(g.en)}" placeholder="คำอังกฤษ">` : esc(g.en)}</td>
-      <td><select data-k="type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}" ${g.type === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-      <td><input type="text" data-k="th" value="${esc(g.th)}"></td>
-      <td><input type="checkbox" data-k="keep_english" ${g.keep_english ? "checked" : ""}></td>
-      <td class="muted">${g.count || ""}</td>${ch}
-      <td><button class="link" data-del>ลบ</button></td>
+      <td class="en" data-label="อังกฤษ" title="${esc(g.example || "")}">${g.isNew ? `<input type="text" data-k="en" value="${esc(g.en)}" placeholder="คำอังกฤษ">` : esc(g.en)}</td>
+      <td data-label="ประเภท"><select data-k="type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}" ${g.type === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+      <td data-label="ไทย"><input type="text" data-k="th" value="${esc(g.th)}"></td>
+      <td data-label="คงอังกฤษ"><input type="checkbox" data-k="keep_english" ${g.keep_english ? "checked" : ""}></td>
+      <td class="muted count-cell" data-label="พบ">${g.count || ""}</td>${ch}
+      <td class="del-cell"><button class="link" data-del>ลบ</button></td>
     </tr>`;
   }).join("");
   tb.querySelectorAll("tr[data-i]").forEach((tr) => {
