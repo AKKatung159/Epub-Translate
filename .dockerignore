@@ -1,0 +1,7 @@
+.venv
+.git
+.github
+data
+tests
+*.epub
+__pycache__

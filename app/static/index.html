@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>แปลหนังสือ EPUB</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'>ก</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">ก</span> แปลหนังสือ EPUB <span class="muted">อังกฤษ → ไทย</span></div>
+  <div id="health" class="pill">กำลังเช็กเครื่องโมเดล…</div>
+</header>
+
+<main>
+  <section id="list-view">
+    <div class="card upload">
+      <h2>เพิ่มหนังสือ</h2>
+      <label id="drop" class="drop">
+        <input id="file" type="file" accept=".epub,application/epub+zip" hidden>
+        <div class="drop-icon">📖</div>
+        <div><b>ลากไฟล์ .epub มาวาง</b> หรือคลิกเพื่อเลือก</div>
+        <div id="file-name" class="muted"></div>
+      </label>
+      <div class="opts">
+        <label><input type="checkbox" id="opt-bilingual"> ฉบับสองภาษา (อังกฤษคู่ไทย ทีละย่อหน้า)</label>
+        <label><input type="checkbox" id="opt-auto"> ข้ามขั้นตรวจ glossary (แปลต่อทันที)</label>
+        <label class="full">หมายเหตุสไตล์การแปล (ไม่บังคับ บรรทัดละข้อ)
+          <textarea id="opt-notes" rows="3" placeholder="เช่น&#10;ตัวละครพูดกับจักรพรรดิให้ใช้ราชาศัพท์&#10;ใช้สรรพนาม 'ข้า/เจ้า' ในบทสนทนาของขุนนาง"></textarea>
+        </label>
+      </div>
+      <div id="upload-bar" class="bar hidden"><div></div></div>
+      <button id="upload" class="primary" disabled>อัปโหลดและเริ่ม</button>
+      <div id="upload-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>งานแปล</h2>
+      <div id="jobs"><div class="muted">ยังไม่มีงาน</div></div>
+    </div>
+  </section>
+
+  <section id="job-view" class="hidden">
+    <button class="link" id="back">← กลับ</button>
+    <div class="card">
+      <div class="row between">
+        <h2 id="job-name"></h2>
+        <span id="job-status" class="badge"></span>
+      </div>
+      <ol class="steps" id="steps">
+        <li data-s="parsed">อ่านไฟล์</li><li data-s="glossary">หาคำเฉพาะ</li><li data-s="review">ตรวจ glossary</li>
+        <li data-s="translating">แปล</li><li data-s="done">เสร็จ</li>
+      </ol>
+      <div id="job-msg" class="msg"></div>
+      <div class="bar big" id="job-bar"><div></div><span></span></div>
+      <div class="stats" id="job-stats"></div>
+      <div class="actions" id="job-actions"></div>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="glossary" class="active">Glossary</button>
+      <button data-tab="flagged">ย่อหน้าที่ต้องตรวจ <span id="flag-count" class="count"></span></button>
+      <button data-tab="preview">ดูตัวอย่างรายบท</button>
+      <button data-tab="settings">ตั้งค่า</button>
+    </nav>
+
+    <div class="card tab" id="tab-glossary">
+      <div class="row wrap">
+        <input id="g-search" placeholder="ค้นหาคำ…">
+        <select id="g-type"><option value="">ทุกประเภท</option></select>
+        <button id="g-add">+ เพิ่มคำ</button>
+        <span class="grow"></span>
+        <button id="g-save">บันทึก</button>
+        <button id="g-start" class="primary hidden">บันทึกและเริ่มแปล</button>
+      </div>
+      <p class="muted small">ชื่อคน/สถานที่ใช้คำไทยนี้ทุกจุดในเล่ม · ติ๊ก "คงอังกฤษ" สำหรับคำที่ไม่ควรแปล · ชี้ที่คำเพื่อดูประโยคตัวอย่าง</p>
+      <div class="table-wrap"><table id="g-table">
+        <thead><tr><th>อังกฤษ</th><th>ประเภท</th><th>ไทย</th><th>คงอังกฤษ</th><th>พบ</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <div id="g-msg" class="msg"></div>
+    </div>
+
+    <div class="card tab hidden" id="tab-flagged">
+      <p class="muted small">ย่อหน้าที่ตรวจไม่ผ่าน (แปลไม่ครบ ยาวผิดปกติ รูปแบบตัวเอียง/ลิงก์หาย) แก้เองหรือกดแปลใหม่ได้ · เครื่องหมายอย่าง [1]…[/1] หรือ [2/] คือตัวเอียง/ลิงก์/ขึ้นบรรทัดใหม่ ให้คงไว้</p>
+      <div id="flagged"></div>
+      <div class="pager" id="flag-pager"></div>
+    </div>
+
+    <div class="card tab hidden" id="tab-preview">
+      <div class="row"><select id="p-doc"></select></div>
+      <div id="preview"></div>
+      <div class="pager" id="p-pager"></div>
+    </div>
+
+    <div class="card tab hidden" id="tab-settings">
+      <label><input type="checkbox" id="s-bilingual"> ไฟล์ที่ดาวน์โหลดเป็นฉบับสองภาษา</label>
+      <label class="full">หมายเหตุสไตล์การแปล (ใช้กับย่อหน้าที่ยังไม่ได้แปล)
+        <textarea id="s-notes" rows="4"></textarea></label>
+      <button id="s-save">บันทึก</button>
+      <div id="s-msg" class="msg"></div>
+      <hr>
+      <button id="s-regloss">ทำ glossary ใหม่ทั้งหมด</button>
+      <button id="s-delete" class="danger">ลบงานนี้</button>
+    </div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

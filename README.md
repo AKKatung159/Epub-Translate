@@ -1,226 +1,63 @@
-# 📚 EPUB AI Translator (Ollama + Thai Novel Pipeline)
+# EPUB Translate (English → Thai)
 
-High-quality English → Thai novel translation pipeline using local LLMs via Ollama.
+Web app that translates an English EPUB into Thai with local models, keeping the book's layout:
+images, CSS, chapters, links, italics and the table of contents stay where they are; only the text changes.
 
-## Designed for:
-- 📖 Full EPUB book translation
-- 🧠 Context-aware chunk processing
--	✨ Two-pass pipeline (Translate → Polish)
--	💾 Crash-safe checkpointing
--	📊 Live performance stats + ETA
--	🔄 Automatic Ollama recovery
--	🧹 Watermark removal
+Runs in the homelab (Proxmox VM `apps`, http://epub.lan) and uses `llama-server` on a ROG Ally as the model
+server (OpenAI-compatible API). See `docs/17-epub-translate.md` in the homelab repo.
 
-⸻
+## What it does
 
-## 🏗 Architecture Overview
-```
-Pipeline flow:
+1. **Upload** an `.epub` (drag and drop, upload progress bar).
+2. **Cut into paragraphs.** Every leaf block (`<p>`, headings, list items, table cells, TOC labels, `<title>`)
+   becomes one segment. Inline markup is turned into numbered markers (`[1]…[/1]`, `[2/]`) so the model can
+   move it with the words; it is rebuilt into the original elements afterwards.
+3. **Glossary.** Capitalised words that are not just sentence starts become candidates (names, places, titles,
+   invented terms). Typhoon 2.1 sorts them (person/place/title/term, or "not a term"); Typhoon Translate gives
+   one Thai form each (Royal Institute transliteration for invented names, meaning for ordinary words used as
+   names). Multi-word names are rebuilt from their parts so they always agree. **You review and edit the table
+   before translating.**
+4. **Translate** in chunks of consecutive paragraphs (one chapter at a time), with the glossary entries that
+   occur in the chunk passed as hard rules (`Translate "Maia" as "ไมอา"`).
+5. **Check every paragraph**: really Thai, no English sentence left behind, sane length, no repetition loop, no
+   leaked markers, glossary names enforced, formatting markers intact. Failures are retried one by one; if only
+   italics/links break, the words are kept (noted); wrong content is flagged for review.
+6. **Review** flagged paragraphs (edit or re-translate), preview chapters side by side.
+7. **Download** the Thai EPUB (also mid-way, partially translated), or a bilingual edition (English paragraph
+   in grey above each Thai one). Thai fonts and line height are added; `dc:language` becomes `th`.
 
-EPUB
-  ↓
-Extract <p> paragraphs
-  ↓
-Chunk intelligently (context aware)
-  ↓
-PASS 1 → Translate Model
-  ↓
-PASS 2 → Polish Model
-  ↓
-Rebuild EPUB
-```
-Models used:
-- Translation: scb10x/typhoon-translate1.5-4b
-- Polish: scb10x/llama3.2-typhoon2-3b-instruct
+Jobs survive restarts and wait (with a message) when the model server is asleep; pause / resume / cancel any time.
 
-Runs locally via:
+## Models
 
-```http://localhost:11434/api/chat```
+| Use | Model | Default name |
+| --- | --- | --- |
+| Translation, glossary Thai forms | [Typhoon Translate 1.5 4B](https://huggingface.co/typhoon-ai/typhoon-translate1.5-4b-gguf) Q4_K_M | `typhoon-translate1.5-4b` |
+| Glossary classification | Typhoon 2.1 Gemma3 4B Q4_K_M | `typhoon2.1-4b` |
 
------------------------------------------------------------------------------------------------------------------------
+Both are served by one `llama-server` in router mode (`--models-preset models.ini`), which loads them on demand.
+On the Ally (Radeon 780M, Vulkan) translation runs at ~24 tok/s, about 28 English characters per second:
+a 160k-character book takes ~1.5 h, a 800k-character novel ~8 h.
 
-## 🚀 Features
+## Configuration (environment)
 
-### ✅ Smart Chunking
-- 600 char chunk limit
-- Context tail memory (last 300 chars)
-- Preserves paragraph structure
+| Variable | Default | |
+| --- | --- | --- |
+| `LLM_BASE_URL` | `http://192.168.0.191:8080/v1` | OpenAI-compatible endpoint |
+| `LLM_API_KEY` | (empty) | llama-server `--api-key` |
+| `TRANSLATE_MODEL` / `GLOSSARY_MODEL` | see above | model names in the router |
+| `CHUNK_CHARS` | `2400` | English characters per request |
+| `DATA_DIR` | `/data` (image) | SQLite DB + uploaded books |
+| `MAX_UPLOAD_MB` | `100` | |
 
-### ✅ Quality Control
-- Detects bad outputs
-- Retries automatically
-- Prevents empty/non-Thai responses
+## Run locally
 
-### ✅ Resource Adaptive
-- Dynamic worker adjustment
-- RAM usage guard
-- Waits when memory > 85%
-
-###✅ Crash-Safe
-- Atomic checkpoint saving (progress.json)
-- Resume anytime
-- Two-pass checkpoint support
-
-### ✅ Live Monitoring
-- translate.log
-- stats.json
-- Real-time ETA
-- Characters/sec tracking
-
------------------------------------------------------------------------------------------------------------------------
-
-## 📦 Requirements
-
-1. Python 3.9+
-
-2. Ollama (Running in Podman container named ollama)
-
-Install models:
-```
-ollama pull scb10x/typhoon-translate1.5-4b
-ollama pull scb10x/llama3.2-typhoon2-3b-instruct
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+.venv/bin/pytest -q tests
+LLM_BASE_URL=http://127.0.0.1:8080/v1 LLM_API_KEY=... .venv/bin/uvicorn app.main:app --port 8765
 ```
 
-3. Python Dependencies
+Image: `ghcr.io/akkatung159/epub-translate` (built by `.github/workflows/image.yml` on every push to main).
 
-Install with:
-
-```make deps```
-
-or manually:
-
-```pip install ebooklib beautifulsoup4 lxml requests psutil tqdm```
-
-
------------------------------------------------------------------------------------------------------------------------
-
-## ⚙️ Configuration
-
-Inside process_book.py:
-```
-MAX_CHARS = 600
-BASE_WORKERS = 2
-MAX_RAM_PERCENT = 85
-```
-Environment override:
-```
-export OLLAMA_URL="http://localhost:11434/api/chat"
-```
-
------------------------------------------------------------------------------------------------------------------------
-
-## 🧪 Usage
-
-Basic
-
-```make run INPUT="your_book.epub"```
-
-or
-
-`make r INPUT="your_book.epub"`
-
-Output:
-
-`your_book_th.epub`
-
-
-⸻
-
-🔍 Monitoring
-
-Live Logs
-
-`make logs`
-
-Live Stats
-
-`make stats`
-
-Example stats.json:
-```
-{
-  "processed_chars": 150000,
-  "total_chars": 900000,
-  "speed_chars_per_sec": 120.4,
-  "eta_seconds": 6234,
-  "ram_percent": 72.1
-}
-```
-
------------------------------------------------------------------------------------------------------------------------
-
-## 🛠 Utility Commands
-
-Health Check
-
-`make health`
-
-Restart Ollama
-
-`make restart`
-
-Clean temp files
-
-`make clean`
-
-Full reset (⚠ destructive)
-
-`make reset`
-
-
------------------------------------------------------------------------------------------------------------------------
-
-## 📁 Project Structure
-```
-process_book.py
-Makefile
-progress.json
-stats.json
-translate.log
-*_tmp.epub
-*_th.epub
-```
-
------------------------------------------------------------------------------------------------------------------------
-
-## 🧨 Recovery & Resume
-
-If process crashes:
-
-Just rerun:
-
-`make run INPUT="your_book.epub"`
-
-It resumes from progress.json.
-
------------------------------------------------------------------------------------------------------------------------
-
-## ⚡ Performance Notes
-
-Recommended machine:
-	•	16GB RAM
-	•	8+ threads
-	•	SSD storage
-
-For low-RAM systems:
-```
-BASE_WORKERS = 1
-MAX_RAM_PERCENT = 75
-```
-
------------------------------------------------------------------------------------------------------------------------
-
-## 🧩 Advanced Improvements (Future Ideas)
-- Per-chapter parallelization
-- Persistent context embedding memory
-- Translation consistency glossary
-- Named entity preservation cache
-- GPU-aware worker scaling
-- SQLite checkpoint backend
-- 	Web dashboard
-
------------------------------------------------------------------------------------------------------------------------
-
-🔐 License
-
-Personal research / educational use.
+Only translate books you have the right to translate; the output is for personal use.
