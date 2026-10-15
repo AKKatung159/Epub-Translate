@@ -49,12 +49,12 @@ def test_check_tags():
     assert check_tags(src, "[1]b[/1] [2]c [3/]d[/2]") is not None             # pair made self-closing
 
 
-def _epub(doc: bytes) -> bytes:
+def _epub(doc: bytes, spine: bytes = b'<itemref idref="c"/>') -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("mimetype", "application/epub+zip")
         z.writestr("META-INF/container.xml", b'<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
-        z.writestr("OEBPS/content.opf", b'<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title><dc:language>en</dc:language></metadata><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/><item id="i" href="pic.jpg" media-type="image/jpeg"/></manifest><spine><itemref idref="c"/></spine></package>')
+        z.writestr("OEBPS/content.opf", b'<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title><dc:language>en</dc:language></metadata><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/><item id="i" href="pic.jpg" media-type="image/jpeg"/></manifest><spine>' + spine + b'</spine></package>')
         z.writestr("OEBPS/c.xhtml", doc)
         z.writestr("OEBPS/pic.jpg", b"\xff\xd8binary")
     return buf.getvalue()
@@ -73,6 +73,25 @@ def test_book_identity_build():
     assert b"<dc:language>th</dc:language>" in out.files["OEBPS/content.opf"]
     with zipfile.ZipFile(io.BytesIO(book.build({}))) as z:
         assert z.infolist()[0].filename == "mimetype" and z.infolist()[0].compress_type == zipfile.ZIP_STORED
+
+
+def test_spine_listing_a_file_twice():
+    book = Book.load(_epub(SAMPLE, b'<itemref idref="c"/><itemref idref="c"/>'))
+    assert book.docs == ["OEBPS/c.xhtml"]
+    paths = [(s.doc, s.path) for s in book.segments()]
+    assert len(paths) == len(set(paths))
+
+
+def test_failed_insert_does_not_poison_the_db(tmp_path):
+    from app.store import Store
+    st = Store(tmp_path / "t.db")
+    st.many("INSERT INTO docs(job_id,doc,ord,title) VALUES(?,?,?,?)", [("j", "d", 0, "t")])
+    try:
+        st.many("INSERT INTO docs(job_id,doc,ord,title) VALUES(?,?,?,?)", [("j", "x", 0, "t"), ("j", "x", 1, "t")])
+    except Exception:  # noqa: BLE001
+        pass
+    st.many("INSERT INTO docs(job_id,doc,ord,title) VALUES(?,?,?,?)", [("j", "y", 2, "t")])   # still works
+    assert [r["doc"] for r in st.q("SELECT doc FROM docs ORDER BY ord")] == ["d", "y"]
 
 
 def test_bilingual_keeps_ids_unique():

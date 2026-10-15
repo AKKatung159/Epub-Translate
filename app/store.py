@@ -54,7 +54,11 @@ class Store:
     def many(self, sql: str, rows) -> None:
         with self.lock:
             self.db.execute("BEGIN")
-            self.db.executemany(sql, rows)
+            try:
+                self.db.executemany(sql, rows)
+            except Exception:
+                self.db.execute("ROLLBACK")      # never leave a transaction open: later writes would all fail
+                raise
             self.db.execute("COMMIT")
 
     # jobs ---------------------------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from .store import job_dir, store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 STATIC = Path(__file__).parent / "static"
+log = logging.getLogger("api")
 
 
 @asynccontextmanager
@@ -92,11 +93,17 @@ async def create_job(file: UploadFile = File(...), bilingual: bool = Form(False)
         raise HTTPException(400, "ไม่พบข้อความภาษาอังกฤษในไฟล์นี้")
     name = re.sub(r"\.epub$", "", file.filename or "book", flags=re.I)
     jid = store.new_job(name, {"bilingual": bilingual, "auto_glossary": auto_glossary, "style_notes": style_notes})
-    (job_dir(jid) / "source.epub").write_bytes(data)
-    store.many("INSERT INTO segments(job_id,id,doc,path,kind,marked,plain) VALUES(?,?,?,?,?,?,?)",
-               [(jid, i, s.doc, s.path, s.kind, s.marked, s.plain) for i, s in enumerate(segs)])
-    store.many("INSERT INTO docs(job_id,doc,ord,title) VALUES(?,?,?,?)",
-               [(jid, d, i, book.titles.get(d, d)) for i, d in enumerate(book.docs)])
+    try:
+        (job_dir(jid) / "source.epub").write_bytes(data)
+        store.many("INSERT INTO segments(job_id,id,doc,path,kind,marked,plain) VALUES(?,?,?,?,?,?,?)",
+                   [(jid, i, s.doc, s.path, s.kind, s.marked, s.plain) for i, s in enumerate(segs)])
+        store.many("INSERT OR IGNORE INTO docs(job_id,doc,ord,title) VALUES(?,?,?,?)",
+                   [(jid, d, i, book.titles.get(d, d)) for i, d in enumerate(book.docs)])
+    except Exception as e:  # noqa: BLE001
+        log.exception("saving job %s failed", jid)
+        store.delete_job(jid)                       # no half-created job left in the list
+        shutil.rmtree(job_dir(jid), ignore_errors=True)
+        raise HTTPException(500, f"บันทึกงานไม่สำเร็จ: {e}") from e
     store.set_status(jid, "glossary", f"อ่านไฟล์แล้ว {len(book.docs)} ไฟล์ {len(segs)} ย่อหน้า กำลังหาคำเฉพาะ…")
     worker.wake.set()
     return _summary(store.job(jid))

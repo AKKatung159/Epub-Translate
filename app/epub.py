@@ -276,8 +276,8 @@ class Book:
         docs = []
         for ref in opf.iterfind(".//{*}spine/{*}itemref"):
             href, mt, _ = manifest.get(ref.get("idref"), (None, "", ""))
-            if href and href in files and ("html" in mt or href.endswith((".html", ".xhtml", ".htm"))):
-                docs.append(href)
+            if href and href in files and href not in docs and ("html" in mt or href.endswith((".html", ".xhtml", ".htm"))):
+                docs.append(href)          # some books list the same file twice in the spine: translate it once
         for href, mt, props in manifest.values():       # EPUB 3 nav document, if it is not in the spine
             if "nav" in props.split() and href in files and href not in docs:
                 docs.append(href)
