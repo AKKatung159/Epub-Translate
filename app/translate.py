@@ -58,6 +58,7 @@ class SegIn:
     id: int
     marked: str
     plain: str
+    speaker: dict | None = None      # glossary entry of the character whose words are quoted here, if known
 
 
 @dataclass
@@ -68,7 +69,8 @@ class SegOut:
     note: str = ""
 
 
-def _rules(glossary_hits: list[dict], style_notes: str, *, chunk: bool = True, marks: bool = True) -> list[str]:
+def _rules(glossary_hits: list[dict], style_notes: str, *, chunk: bool = True, marks: bool = True,
+           speech: list[str] = ()) -> list[str]:
     rules = []
     for e in glossary_hits:
         if e.get("keep_english"):
@@ -79,6 +81,7 @@ def _rules(glossary_hits: list[dict], style_notes: str, *, chunk: bool = True, m
         r = character_rule(e)
         if r:
             rules.append(r)
+    rules += speech
     for i, r in enumerate(BASE_RULES):
         if (i == PARA_RULE and not chunk) or (i == MARK_RULE and not marks):
             continue          # a single paragraph must not hear about [[N]] blocks, or it invents them
@@ -148,6 +151,28 @@ def qa(src_plain: str, out_marked: str, keep_english: tuple[str, ...] = ()) -> s
     return None
 
 
+def _who(e: dict) -> str:
+    return f'{e["en"]} ({e["th"]})' if e.get("th") and e["th"] != e["en"] else e["en"]
+
+
+def _unnamed(s: SegIn) -> bool:
+    """The speaker is known but not named in the paragraph ("she said", a quote alone): the model needs telling.
+    When the name is there ("Alice said"), its character rule already covers it; the speaker still drives the
+    particle check."""
+    return bool(s.speaker) and not re.search(r"(?<![A-Za-z])" + re.escape(s.speaker["en"]) + r"(?![A-Za-z])", s.plain)
+
+
+def _with_speakers(hits: list[dict], segs: list[SegIn]) -> list[dict]:
+    """A quote-only paragraph does not name its speaker; the speaker's character rule must still be there."""
+    have = {e["en"] for e in hits}
+    extra = []
+    for s in segs:
+        if s.speaker and s.speaker["en"] not in have:
+            have.add(s.speaker["en"])
+            extra.append(s.speaker)
+    return hits + extra
+
+
 def _keep(hits: list[dict]) -> tuple[str, ...]:
     return tuple(e["en"] for e in hits if e.get("keep_english"))
 
@@ -164,11 +189,13 @@ def fix_glossary(out: str, hits: list[dict]) -> str:
 def translate_chunk(segs: list[SegIn], glossary_find, style_notes: str, stats) -> list[SegOut]:
     """Translate a chunk; never raises for content problems (only ServerUnavailable)."""
     source = "\n".join(f"[[{i + 1}]]{s.marked}[[/{i + 1}]]" for i, s in enumerate(segs))
-    hits = glossary_find(" ".join(s.plain for s in segs))
+    hits = _with_speakers(glossary_find(" ".join(s.plain for s in segs)), segs)
+    speech = [f"In paragraph [[{i + 1}]], the words in quotation marks are spoken by {_who(s.speaker)}."
+              for i, s in enumerate(segs) if _unnamed(s)]
     results: dict[int, SegOut] = {}
     retry: list[SegIn] = []
     try:
-        reply = llm.chat(settings.translate_model, _prompt(source, _rules(hits, style_notes)),
+        reply = llm.chat(settings.translate_model, _prompt(source, _rules(hits, style_notes, speech=speech)),
                          max_tokens=_max_tokens(len(source)))
         stats(reply)
         parts = {int(n): t.strip() for n, t in P_RE.findall(reply.text)}
@@ -181,7 +208,8 @@ def translate_chunk(segs: list[SegIn], glossary_find, style_notes: str, stats) -
                 continue
             out = fix_glossary(_clean(out), hits)
             if (qa(s.plain, out, _keep(hits)) or untranslated_spans(s.marked, out, _keep(hits))
-                    or check_tags(s.marked, out) or gender_mismatch(out, with_cast(glossary_find(s.plain), hits))):
+                    or check_tags(s.marked, out)
+                    or gender_mismatch(out, [s.speaker] if s.speaker else with_cast(glossary_find(s.plain), hits))):
                 retry.append(s)
             else:
                 results[s.id] = SegOut(s.id, out, "done")
@@ -201,9 +229,11 @@ def with_cast(para_hits: list[dict], chunk_hits: list[dict]) -> list[dict]:
 
 
 def translate_one(s: SegIn, glossary_find, style_notes: str, stats, context: list[dict] | None = None) -> SegOut:
-    hits = with_cast(glossary_find(s.plain), context or [])
+    hits = _with_speakers(with_cast(glossary_find(s.plain), context or []), [s])
+    speech = [f"The words in quotation marks are spoken by {_who(s.speaker)}."] if _unnamed(s) else []
+    check_cast = [s.speaker] if s.speaker else hits
     has_marks = bool(TAG_RE.search(s.marked))
-    rules = _rules(hits, style_notes, chunk=False, marks=has_marks)
+    rules = _rules(hits, style_notes, chunk=False, marks=has_marks, speech=speech)
     simplified, last_out, last_problem = None, "", "no output"
     soft: tuple[str, str] | None = None        # (text, note): fine except a possibly wrong ending particle
     for temperature in (0.2, 0.5):
@@ -218,7 +248,7 @@ def translate_one(s: SegIn, glossary_find, style_notes: str, stats, context: lis
         if check_tags(s.marked, out):
             simplified = simplified or _simplified(s.marked, out)
             continue
-        mismatch = gender_mismatch(out, hits)
+        mismatch = gender_mismatch(out, check_cast)
         if not mismatch:
             return SegOut(s.id, out, "done")
         soft = soft or (out, f"ตรวจคำลงท้าย: {mismatch}")
@@ -229,7 +259,8 @@ def translate_one(s: SegIn, glossary_find, style_notes: str, stats, context: lis
 
     if has_marks:
         # the markers themselves may confuse it: translate the plain text
-        reply = llm.chat(settings.translate_model, _prompt(s.plain, _rules(hits, style_notes, chunk=False, marks=False)),
+        reply = llm.chat(settings.translate_model, _prompt(s.plain, _rules(hits, style_notes, chunk=False, marks=False,
+                                                                          speech=speech)),
                          max_tokens=_max_tokens(len(s.plain)))
         stats(reply)
         out = fix_glossary(_clean(TAG_RE.sub("", reply.text)), hits)
@@ -239,15 +270,17 @@ def translate_one(s: SegIn, glossary_find, style_notes: str, stats, context: lis
     return SegOut(s.id, _simplified(s.marked, last_out), "flagged", last_problem)
 
 
-def make_chunks(segs: list[tuple[int, str, str, str]], limit: int) -> list[list[SegIn]]:
+def make_chunks(segs: list[tuple[int, str, str, str]], limit: int,
+                speakers: dict[int, dict] | None = None) -> list[list[SegIn]]:
     """segs: (id, doc, marked, plain) in reading order -> chunks inside one document."""
+    speakers = speakers or {}
     chunks, cur, cur_doc, size = [], [], None, 0
     for sid, doc, marked, plain in segs:
         n = len(marked)
         if cur and (doc != cur_doc or size + n > limit):
             chunks.append(cur)
             cur, size = [], 0
-        cur.append(SegIn(sid, marked, plain))
+        cur.append(SegIn(sid, marked, plain, speakers.get(sid)))
         cur_doc = doc
         size += n
     if cur:

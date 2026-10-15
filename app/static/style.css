@@ -194,6 +194,7 @@ input[type=checkbox] { min-height: auto; width: 18px; height: 18px; accent-color
 .stat-label { display: block; font-size: 12px; color: var(--muted); }
 .stat-value { display: block; font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stat.warn .stat-value { color: var(--warn); }
+.stat.ok .stat-value { color: var(--ok); }
 
 .action-area { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .actions, .actions-more { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -237,6 +238,7 @@ td input[type=text]:focus, td select:focus { background: var(--surface); border-
 td select { padding-right: 26px; background-position: right 8px center; }
 td.en { font-weight: 600; white-space: nowrap; padding-left: 14px; }
 tr.user td.en::after { content: "แก้แล้ว"; margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 6px; }
+tr.series td.en::after { content: "จากเล่มก่อน"; margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--ok); background: var(--ok-soft); padding: 1px 6px; border-radius: 6px; }
 td.count-cell { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 td.nochar { color: var(--line); }
 td.del-cell { text-align: right; padding-right: 12px; }

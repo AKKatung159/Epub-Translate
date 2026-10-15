@@ -122,6 +122,23 @@ class Store:
         out = {r["status"]: {"n": r["n"], "chars": r["c"] or 0} for r in rows}
         return out
 
+    def readable(self, jid: str) -> tuple[str | None, int, int]:
+        """(last chapter title, chapters, of total) translated without a gap from the start of the book."""
+        per_doc = self.q("""SELECT d.title, SUM(s.status='pending') pending FROM docs d
+                            JOIN segments s ON s.job_id=d.job_id AND s.doc=d.doc AND s.kind='text'
+                            WHERE d.job_id=? GROUP BY d.doc ORDER BY d.ord""", (jid,))
+        title, ready = None, 0
+        for r in per_doc:
+            if r["pending"]:
+                break
+            title, ready = r["title"], ready + 1
+        return title, ready, len(per_doc)
+
+    def percent(self, jid: str) -> float:
+        c = self.counts(jid)
+        total = sum(v["chars"] for v in c.values())
+        return 100 * sum(v["chars"] for k, v in c.items() if k != "pending") / total if total else 0.0
+
 
 store = Store(settings.data_dir / "app.db")
 

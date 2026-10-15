@@ -222,3 +222,62 @@ def gender_mismatch(text_th: str, hits: list[dict]) -> str | None:
     if p["particle"] == "ครับ" and re.search(r"(?<![ก-๙])(ค่ะ|คะ)(?![ก-๙])", text_th):
         return f'{p["en"]} is male but the dialogue uses ค่ะ/คะ'
     return None
+
+
+# ---------------------------------------------------------------------------------------------- who is speaking
+
+QUOTED = re.compile(r"“[^”]*”?|\"[^\"]*\"?")
+SPEECH_VERBS = (r"said|says|say|asked|asks|replied|replies|answered|cried|shouted|yelled|screamed|whispered|"
+                r"muttered|murmured|exclaimed|called|added|continued|began|snapped|demanded|insisted|told|"
+                r"sobbed|sighed|protested|observed|remarked|inquired|enquired|grumbled|growled|hissed|retorted|"
+                r"agreed|interrupted|repeated|admitted|declared|pleaded|begged|laughed|went on")
+VERB_RE = re.compile(rf"\b(?:{SPEECH_VERBS})\b", re.I)
+
+
+def speakers(paras: list[str], people: list[dict]) -> list[str | None]:
+    """For each paragraph of one chapter, in reading order: the English name of the character whose words are
+    in quotation marks, or None when it is not clear.
+
+    - "…,” said Alice / Alice said, “…” / “…,” the Rabbit replied: the name right next to a speech verb outside
+      the quotes. "he said" / "she said" stay unknown: tried against the last named man/woman, it was wrong too
+      often (the point-of-view character is "he" for pages without being named), and a wrong speaker is worse
+      than none;
+    - a paragraph that is only a quote, inside a run of dialogue: the speaker from two paragraphs back (people
+      take turns).
+    A wrong guess is worse than none, so anything unclear stays None."""
+    people = [p for p in people if p.get("type") == "person" and p.get("en")]
+    if not people:
+        return [None] * len(paras)
+    by_en = {p["en"]: p for p in people}
+    alt = "|".join(re.escape(n) for n in sorted(by_en, key=len, reverse=True))
+    who = r"(?:[Tt]he\s+)?(" + alt + r")(?![A-Za-z])"
+    # right next to the verb only: "Alice said", "the Rabbit replied", "she asked", "said Alice", "asked the Rabbit"
+    who_before = re.compile(r"(?:^|[\s,;—–(])" + who + r"\s*$")
+    who_after = re.compile(r"^\s*" + who)
+    # "Telimezh said" (not in the glossary), "she said", "I said": a speaker we cannot name
+    unknown_before = re.compile(r"(?:[A-Z][\w’'-]+|\b(?:he|she|they|it|we|you))\s*$")
+    unknown_after = re.compile(r"^\s*(?:(?:[Tt]he\s+)?[A-Z]|(?:he|she|they|it|we|you)\b)")
+    out: list[str | None] = []
+    turn: list[str | None] = [None, None]          # speakers of the two previous dialogue paragraphs
+    for p in paras:
+        quoted = bool(QUOTED.search(p))
+        narration = QUOTED.sub(" ¶ ", p)
+        sp = None
+        if quoted:
+            for v in VERB_RE.finditer(narration):
+                before = narration[:v.start()].split("¶")[-1][-50:]
+                after = narration[v.end():].split("¶")[0][:50]
+                m = who_before.search(before) or who_after.match(after)
+                if m:
+                    sp = m.group(1)
+                    break
+                if unknown_before.search(before) or unknown_after.match(after):
+                    break                                   # a speaker we do not know: no guess
+            if sp is None and not narration.replace("¶", "").strip(" ,.;:—–-…!?"):
+                sp = turn[0] if turn[1] and turn[0] != turn[1] else None    # pure quote: back-and-forth
+        if quoted:
+            turn = [turn[1], sp]
+        else:
+            turn = [None, None]
+        out.append(sp)
+    return out

@@ -16,17 +16,25 @@ server (OpenAI-compatible API). See `docs/17-epub-translate.md` in the homelab r
    invented terms). Typhoon 2.1 sorts them (person/place/title/term, or "not a term"); Typhoon Translate gives
    one Thai form each (Royal Institute transliteration for invented names, meaning for ordinary words used as
    names). Multi-word names are rebuilt from their parts so they always agree. **You review and edit the table
-   before translating.**
+   before translating.** For **book 2 of a series**, pick the earlier book on upload (or "นำเข้าจากเล่มก่อน" in the
+   glossary tab): its names, Thai forms, character sheet and book profile carry over, entries are added only when
+   this book mentions them, and anything typed in this book is never overwritten.
 4. **Translate** in chunks of consecutive paragraphs (one chapter at a time), with the glossary entries that
-   occur in the chunk passed as hard rules (`Translate "Maia" as "ไมอา"`).
+   occur in the chunk passed as hard rules (`Translate "Maia" as "ไมอา"`). **Speakers:** a quote whose speaker is
+   named next to a speech verb (`“…,” said Csevet`) is checked against that character's ending particle; a
+   quote-only paragraph in a back-and-forth gets the speaker from two paragraphs back, told to the model.
+   `he said` / `she said` are not guessed (tested on a novel: the point-of-view character is "he" for pages
+   without being named, so the guess was often wrong).
 5. **Check every paragraph**: really Thai, no English sentence left behind, sane length, no repetition loop, no
    leaked markers, glossary names enforced, formatting markers intact. Failures are retried one by one; if only
    italics/links break, the words are kept (noted); wrong content is flagged for review.
 6. **Review** flagged paragraphs (edit or re-translate), preview chapters side by side.
-7. **Download** the Thai EPUB (also mid-way, partially translated), or a bilingual edition (English paragraph
+7. **Download** the Thai EPUB (also mid-way: the job page shows up to which chapter it reads without gaps), or a bilingual edition (English paragraph
    in grey above each Thai one). Thai fonts and line height are added; `dc:language` becomes `th`.
 
 Jobs survive restarts and wait (with a message) when the model server is asleep; pause / resume / cancel any time.
+With `DISCORD_WEBHOOK_URL` set, Discord gets: glossary ready to review, 25 / 50 / 75 % (with ETA and readable
+chapters), done, no model server for 5 minutes (and back), errors.
 
 ## Models
 
@@ -50,6 +58,9 @@ a 160k-character book takes ~1 h, a 800k-character novel ~5 h.
 | `CHUNK_CHARS` | `2400` | English characters per request |
 | `DATA_DIR` | `/data` (image) | SQLite DB + uploaded books |
 | `MAX_UPLOAD_MB` | `100` | |
+| `TRANSLATE_PARALLEL` | `4` | chunks in flight (= llama-server `parallel`) |
+| `DISCORD_WEBHOOK_URL` | (empty = off) | notifications |
+| `PUBLIC_URL` | (empty) | e.g. `http://epub.lan`, makes the Discord titles links to the job |
 
 ## Run locally
 

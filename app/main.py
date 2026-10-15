@@ -51,6 +51,7 @@ def _summary(j: dict) -> dict:
     if j["status"] in ("translating", "waiting", "queued") and st.get("chars_per_sec"):
         eta = int((total_chars - done_chars) / st["chars_per_sec"])
     gl = store.q("SELECT COUNT(*) n FROM glossary WHERE job_id=?", (j["id"],))[0]["n"]
+    readable, ready, docs_total = store.readable(j["id"])
     return {
         "id": j["id"], "name": j["name"], "created": j["created"], "status": j["status"], "message": j["message"],
         "options": j["options"], "segments": total_n,
@@ -61,6 +62,8 @@ def _summary(j: dict) -> dict:
         "current_doc": st.get("current_doc"), "glossary_terms": gl,
         "glossary_progress": [st.get("glossary_done"), st.get("glossary_total")],
         "started": st.get("started"), "finished": st.get("finished"),
+        "readable_until": readable, "docs_ready": ready, "docs_total": docs_total,
+        "series_from": j["options"].get("series_from", ""),
     }
 
 
@@ -81,7 +84,7 @@ def list_jobs():
 
 @app.post("/api/jobs")
 async def create_job(file: UploadFile = File(...), bilingual: bool = Form(False), auto_glossary: bool = Form(False),
-                     style_notes: str = Form("")):
+                     style_notes: str = Form(""), series_from: str = Form("")):
     data = await file.read()
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"ไฟล์ใหญ่เกิน {settings.max_upload_mb} MB")
@@ -93,7 +96,11 @@ async def create_job(file: UploadFile = File(...), bilingual: bool = Form(False)
     if not segs:
         raise HTTPException(400, "ไม่พบข้อความภาษาอังกฤษในไฟล์นี้")
     name = re.sub(r"\.epub$", "", file.filename or "book", flags=re.I)
-    jid = store.new_job(name, {"bilingual": bilingual, "auto_glossary": auto_glossary, "style_notes": style_notes})
+    prev = store.job(series_from) if series_from else None
+    if prev and not style_notes.strip():
+        style_notes = prev["options"].get("style_notes", "")     # the series keeps its style rules
+    jid = store.new_job(name, {"bilingual": bilingual, "auto_glossary": auto_glossary, "style_notes": style_notes,
+                               "series_from": prev["id"] if prev else ""})
     try:
         (job_dir(jid) / "source.epub").write_bytes(data)
         store.many("INSERT INTO segments(job_id,id,doc,path,kind,marked,plain) VALUES(?,?,?,?,?,?,?)",
@@ -211,6 +218,18 @@ def put_glossary(jid: str, terms: list[Term]):
     return {"ok": True, "terms": len(rows)}
 
 
+@app.post("/api/jobs/{jid}/glossary/import")
+def import_glossary(jid: str, source: str):
+    """Book 2 of a series: take names, Thai forms and the character sheet from an earlier book."""
+    j = _job_or_404(jid)
+    _job_or_404(source)
+    if source == jid:
+        raise HTTPException(400, "เลือกเล่มอื่น")
+    if j["status"] in ("glossary", "translating"):
+        raise HTTPException(409, "รอให้ขั้นนี้เสร็จก่อน หรือหยุดชั่วคราว")
+    return {"ok": True, "terms": worker.import_series(jid, source)}
+
+
 # segments / review ----------------------------------------------------------------------------------------
 
 @app.get("/api/jobs/{jid}/docs")
@@ -266,9 +285,11 @@ def retranslate(jid: str, sid: int):
     r = store.q("SELECT marked, plain FROM segments WHERE job_id=? AND id=?", (jid, sid))
     if not r:
         raise HTTPException(404)
-    find = matcher(worker.glossary_entries(jid))
+    entries = worker.glossary_entries(jid)
+    find = matcher(entries)
+    speaker = worker.speaker_map(jid, entries).get(sid)
     try:
-        o = translate_one(SegIn(sid, r[0]["marked"], r[0]["plain"]), find,
+        o = translate_one(SegIn(sid, r[0]["marked"], r[0]["plain"], speaker), find,
                           worker.style_notes(store.job(jid)), lambda _: None)
     except llm.ServerUnavailable as e:
         raise HTTPException(503, f"ต่อเครื่องโมเดลไม่ได้: {e}") from e

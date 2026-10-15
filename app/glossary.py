@@ -235,6 +235,8 @@ def harmonize(entries: list[dict]) -> list[dict]:
     single = {e["en"]: e for e in entries if " " not in e["en"]}
     for e in entries:
         words = e["en"].split()
+        if e.get("source") in ("user", "series"):
+            continue                  # a form someone already chose stays as it is
         if len(words) > 1 and e["type"] in ("person", "place") and all(w in single for w in words):
             parts = [single[w] for w in words]
             if all(p["type"] in ("person", "place") and not p["keep_english"] for p in parts):
@@ -274,3 +276,32 @@ def group_by_type(entries: list[dict]) -> dict[str, list[dict]]:
     for e in entries:
         g[e["type"]].append(e)
     return g
+
+
+# ---------------------------------------------------------------------------------------------- series
+
+SERIES_KEEP = ("type", "th", "keep_english", "gender", "role", "particle", "self_pronoun", "addressed_as")
+
+
+def merge_series(entries: list[dict], prev: list[dict], texts: list[str]) -> list[dict]:
+    """Book 2 of a series: names the earlier book already has keep its Thai and character sheet; its other
+    entries are added when they occur in this book. Nothing is added that this book never mentions."""
+    by_en = {e["en"]: e for e in entries}
+    for p in prev:
+        e = by_en.get(p["en"])
+        if e and e.get("source") != "user":
+            e.update({k: p.get(k, "") for k in SERIES_KEEP}, source="series")
+    missing = [p for p in prev if p.get("en") and p["en"] not in by_en]
+    if missing:
+        find = matcher(missing)
+        count: Counter = Counter()
+        example: dict[str, str] = {}
+        for t in texts:
+            for e in find(t):
+                count[e["en"]] += 1
+                example.setdefault(e["en"], _trim(t, e["en"]))
+        for p in missing:
+            if count[p["en"]]:
+                entries.append({**{k: p.get(k, "") for k in SERIES_KEEP}, "en": p["en"], "count": count[p["en"]],
+                                "example": example[p["en"]], "source": "series"})
+    return harmonize(entries)

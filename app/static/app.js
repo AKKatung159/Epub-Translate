@@ -73,6 +73,7 @@ $("#upload").onclick = () => {
   fd.append("bilingual", $("#opt-bilingual").checked);
   fd.append("auto_glossary", $("#opt-auto").checked);
   fd.append("style_notes", $("#opt-notes").value);
+  fd.append("series_from", $("#opt-series").value);
   const bar = $("#upload-bar"), msg = $("#upload-msg");
   bar.classList.remove("hidden"); msg.className = "msg"; msg.textContent = "กำลังอัปโหลด…";
   $("#upload").disabled = true;
@@ -97,8 +98,20 @@ $("#upload").onclick = () => {
 };
 
 // ------------------------------------------------------------------------------------------- job list
+let allJobs = [];
+// earlier books whose glossary can carry over to the next book of a series
+function seriesOptions(sel, exclude) {
+  const keep = sel.value, first = sel.options[0].outerHTML;
+  const books = allJobs.filter((j) => j.id !== exclude && j.glossary_terms && !["parsed", "glossary"].includes(j.status));
+  if (document.activeElement === sel) return books.length;     // rebuilding would close the open list
+  sel.innerHTML = first + books.map((j) => `<option value="${j.id}">${esc(j.name)} (${j.glossary_terms} คำ)</option>`).join("");
+  if (books.some((j) => j.id === keep)) sel.value = keep;
+  return books.length;
+}
 async function loadJobs() {
   const jobs = await api("/api/jobs");
+  allJobs = jobs;
+  $("#series-field").classList.toggle("hidden", !seriesOptions($("#opt-series")));
   const box = $("#jobs");
   if (!jobs.length) {
     box.innerHTML = `<div class="empty">${icon("book")}<b>ยังไม่มีงานแปล</b><span>เพิ่มไฟล์ .epub ทางซ้ายเพื่อเริ่ม</span></div>`;
@@ -168,10 +181,16 @@ async function refreshJob() {
     j.chars_per_sec ? stat("ความเร็ว (5 นาทีล่าสุด)", `${j.chars_per_sec} ตัวอักษร/วิ${j.gen_tps ? ` · ${j.gen_tps} tok/s` : ""}`) : "",
     elapsed ? stat("ใช้เวลาไป", fmtDur(elapsed)) : "",
     j.current_doc && j.status === "translating" ? stat("กำลังแปล", esc(j.current_doc)) : "",
+    j.status !== "done" && j.docs_ready ? stat("อ่านต่อเนื่องได้แล้ว", `${j.docs_ready}/${j.docs_total} บท · ถึง ${esc(j.readable_until)}`, "ok") : "",
   ].filter(Boolean).join("");
   $("#flag-count").textContent = j.flagged || "";
   renderActions(j);
   $("#g-start").classList.toggle("hidden", j.status !== "review");
+  const imp = $("#g-import");
+  if (document.activeElement !== imp) {
+    if (!allJobs.length) api("/api/jobs").then((x) => { allJobs = x; }).catch(() => {});
+    imp.classList.toggle("hidden", !seriesOptions(imp, j.id) || ["glossary", "translating"].includes(j.status));
+  }
   const prof = $("#g-profile");
   if (document.activeElement !== prof && !prof.dataset.dirty) prof.value = j.options.book_profile || "";
   if (prev !== j.status && (j.status === "review" || prev === "glossary")) loadGlossary();
@@ -190,7 +209,7 @@ function renderActions(j) {
   if (j.status === "done") btn(`${icon("download")}ดาวน์โหลด EPUB ไทย`, "dl", "primary");
   if (["queued", "translating", "waiting", "glossary"].includes(j.status)) btn("หยุดชั่วคราว", "pause");
   if (j.done + j.flagged > 0) {
-    if (j.status !== "done") btn(`${icon("download")}เท่าที่แปลแล้ว`, "dl");
+    if (j.status !== "done") btn(`${icon("download")}อ่านเท่าที่แปลแล้ว`, "dl");
     btn(`${icon("download")}สองภาษา`, "dl-bi");
   }
   if (j.flagged && ["done", "paused", "review", "error"].includes(j.status)) btn(`แปลใหม่ ${j.flagged} ย่อหน้า`, "retry-flagged");
@@ -256,7 +275,7 @@ function renderGlossary() {
       <td data-label="บทบาท">${txt("role", g.role, "เช่น จักรพรรดิ", 110)}</td>
       <td data-label="คนอื่นเรียก">${txt("addressed_as", g.addressed_as, "เช่น ราชาศัพท์", 90)}</td>` : `<td colspan="5" class="muted small nochar">—</td>`;
     return `
-    <tr data-i="${i}" class="${g.source === "user" ? "user" : ""}">
+    <tr data-i="${i}" class="${g.source === "user" ? "user" : g.source === "series" ? "series" : ""}">
       <td class="en" data-label="อังกฤษ" title="${esc(g.example || "")}">${g.isNew ? `<input type="text" data-k="en" value="${esc(g.en)}" placeholder="คำอังกฤษ">` : esc(g.en)}</td>
       <td data-label="ประเภท"><select data-k="type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}" ${g.type === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
       <td data-label="ไทย"><input type="text" data-k="th" value="${esc(g.th)}"></td>
@@ -297,6 +316,19 @@ $("#g-profile-save").onclick = async () => {
     $("#g-profile-msg").textContent = "";
     toast("บันทึกข้อมูลหนังสือแล้ว ใช้กับย่อหน้าที่ยังไม่ได้แปล");
     refreshJob();
+  } catch (e) { toast(e.message, "err"); }
+};
+$("#g-import").onchange = async () => {
+  const sel = $("#g-import"), src = sel.value;
+  if (!src) return;
+  const name = sel.selectedOptions[0].textContent;
+  sel.value = "";
+  if (!confirm(`ใช้ชื่อ คำแปล และข้อมูลตัวละครจาก "${name}"? คำที่คุณแก้เองในเล่มนี้จะไม่ถูกทับ`)) return;
+  try {
+    if (glossaryDirty) await saveGlossary();
+    const r = await api(`/api/jobs/${current}/glossary/import?source=${encodeURIComponent(src)}`, { method: "POST" });
+    toast(`นำเข้าจากเล่มก่อนแล้ว ${r.terms} คำ`);
+    glossaryDirty = false; await loadGlossary(); refreshJob();
   } catch (e) { toast(e.message, "err"); }
 };
 $("#g-save").onclick = () => saveGlossary().catch((e) => toast(e.message, "err"));

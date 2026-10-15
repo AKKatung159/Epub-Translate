@@ -49,6 +49,8 @@
           <span class="switch-text">ฉบับสองภาษา<small>อังกฤษคู่ไทยทีละย่อหน้า</small></span></label>
         <label class="switch"><input type="checkbox" id="opt-auto"><span class="track"></span>
           <span class="switch-text">ข้ามขั้นตรวจ glossary<small>แปลต่อทันทีหลังหาคำเฉพาะ</small></span></label>
+        <label class="field hidden" id="series-field">ต่อจากเล่มก่อน (นิยายชุด) <small>ใช้ชื่อ คำแปล ข้อมูลตัวละคร และข้อมูลหนังสือของเล่มนั้น</small>
+          <select id="opt-series"><option value="">ไม่ใช่ เป็นเล่มแรก/เล่มเดี่ยว</option></select></label>
         <details class="more">
           <summary>หมายเหตุสไตล์การแปล</summary>
           <textarea id="opt-notes" rows="3" placeholder="บรรทัดละข้อ เช่น&#10;ตัวละครพูดกับจักรพรรดิให้ใช้ราชาศัพท์&#10;Carl เป็นผู้ชาย พูดแบบกันเอง"></textarea>
@@ -109,6 +111,7 @@
         <label class="search"><svg><use href="#i-search"/></svg><input id="g-search" placeholder="ค้นหาคำ…" type="search"></label>
         <select id="g-type"><option value="">ทุกประเภท</option></select>
         <button id="g-add" class="ghost">+ เพิ่มคำ</button>
+        <select id="g-import" class="hidden" title="ใช้ชื่อและข้อมูลตัวละครจากเล่มก่อนของชุด"><option value="">นำเข้าจากเล่มก่อน…</option></select>
         <span class="grow"></span>
         <button id="g-save">บันทึก</button>
         <button id="g-start" class="primary hidden">บันทึกและเริ่มแปล</button>
