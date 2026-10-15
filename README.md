@@ -36,8 +36,9 @@ Jobs survive restarts and wait (with a message) when the model server is asleep;
 | Glossary classification | Typhoon 2.1 Gemma3 4B Q4_K_M | `typhoon2.1-4b` |
 
 Both are served by one `llama-server` in router mode (`--models-preset models.ini`), which loads them on demand.
-On the Ally (Radeon 780M, Vulkan) translation runs at ~24 tok/s, about 28 English characters per second:
-a 160k-character book takes ~1.5 h, a 800k-character novel ~8 h.
+On the Ally (Radeon 780M, Vulkan) the app keeps 4 chunks in flight (`TRANSLATE_PARALLEL`, = llama-server `parallel`):
+4 sequences batch to ~64–82 tok/s total vs ~25 for one, so ~45 English characters per second end to end:
+a 160k-character book takes ~1 h, a 800k-character novel ~5 h.
 
 ## Configuration (environment)
 

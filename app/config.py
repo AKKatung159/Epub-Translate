@@ -12,6 +12,7 @@ class Settings:
     translate_model: str = os.environ.get("TRANSLATE_MODEL", "typhoon-translate1.5-4b")
     glossary_model: str = os.environ.get("GLOSSARY_MODEL", "typhoon2.1-4b")
     chunk_chars: int = int(os.environ.get("CHUNK_CHARS", "2400"))      # English characters per request
+    translate_parallel: int = int(os.environ.get("TRANSLATE_PARALLEL", "4"))   # chunks in flight (= llama-server slots)
     max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "100"))
     max_glossary_terms: int = int(os.environ.get("MAX_GLOSSARY_TERMS", "400"))
 

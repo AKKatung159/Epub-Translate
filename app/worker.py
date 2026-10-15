@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from . import characters, glossary, llm
 from .config import settings
@@ -144,39 +145,59 @@ def run_translation(jid: str) -> None:
     titles = {r["doc"]: r["title"] for r in store.q("SELECT doc, title FROM docs WHERE job_id=?", (jid,))}
     doc_of = {r["id"]: r["doc"] for r in rows}
 
-    recent: deque = deque(maxlen=12)          # (seconds, chars) of the last chunks, for speed/ETA
-    tps: deque = deque(maxlen=12)
+    finished: deque = deque(maxlen=40)        # (time, chars) of the last finished chunks, for speed/ETA
+    tps: deque = deque(maxlen=24)
     st = job["stats"]
     st.setdefault("started", time.time())
     store.update_stats(jid, started=st["started"])
+    t_start = time.time()
 
     def on_reply(reply):
         if reply.gen_tps:
             tps.append(reply.gen_tps)
 
-    for chunk in chunks:
-        status = _status(jid)
-        if status not in ("translating", "waiting"):
-            return                            # paused / cancelled / deleted
-        doc = doc_of[chunk[0].id]
-        store.set_message(jid, f"กำลังแปล: {titles.get(doc, doc)}")
-        t0 = time.time()
-        while True:
-            try:
-                outs = translate_chunk(chunk, find, notes, on_reply)
-                break
-            except llm.ServerUnavailable:
+    # Several chunks at once: llama-server batches them on the GPU (measured: 4 at once = 2.6x the
+    # throughput of 1, same model and prompts, so the same quality). Chunks are independent, so order
+    # of completion does not matter; each is saved as soon as it is done.
+    n = max(1, settings.translate_parallel)
+    pending = deque(chunks)
+    running: dict = {}
+    with ThreadPoolExecutor(max_workers=n, thread_name_prefix="chunk") as pool:
+        while pending or running:
+            go_on = _status(jid) in ("translating", "waiting")
+            while go_on and pending and len(running) < n:
+                chunk = pending.popleft()
+                doc = doc_of[chunk[0].id]
+                store.set_message(jid, f"กำลังแปล: {titles.get(doc, doc)}")
+                running[pool.submit(translate_chunk, chunk, find, notes, on_reply)] = chunk
+            if not running:
+                break                                         # paused / cancelled with nothing in flight
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            server_down = False
+            for fut in done:
+                chunk = running.pop(fut)
+                try:
+                    outs = fut.result()
+                except llm.ServerUnavailable:
+                    pending.appendleft(chunk)                 # try this chunk again later
+                    server_down = True
+                    continue
+                store.many("UPDATE segments SET out=?, status=?, note=? WHERE job_id=? AND id=? AND edited=0",
+                           [(o.marked, o.status, o.note, jid, o.id) for o in outs])
+                finished.append((time.time(), sum(len(x.plain) for x in chunk)))
+                span = finished[-1][0] - (finished[0][0] if len(finished) > 1 else t_start)
+                chars = sum(c for _, c in finished) if len(finished) > 1 else finished[0][1]
+                store.update_stats(jid, chars_per_sec=round(chars / span, 1) if span > 0 else 0,
+                                   gen_tps=round(sum(tps) / len(tps) * min(n, len(running) + 1), 1) if tps else 0,
+                                   current_doc=titles.get(doc_of[chunk[0].id], ""))
+            if server_down and not running:
                 _wait_for_server(jid)
                 if _status(jid) not in ACTIVE:
                     return
                 store.set_status(jid, "translating", "ต่อเครื่องโมเดลได้แล้ว แปลต่อ")
-        store.many("UPDATE segments SET out=?, status=?, note=? WHERE job_id=? AND id=? AND edited=0",
-                   [(o.marked, o.status, o.note, jid, o.id) for o in outs])
-        recent.append((time.time() - t0, sum(len(s.plain) for s in chunk)))
-        secs, chars = sum(r[0] for r in recent), sum(r[1] for r in recent)
-        store.update_stats(jid, chars_per_sec=round(chars / secs, 1) if secs else 0,
-                           gen_tps=round(sum(tps) / len(tps), 1) if tps else 0, current_doc=titles.get(doc, doc))
+            if _status(jid) not in ("translating", "waiting") and not running:
+                return                                        # paused / cancelled / deleted
 
-    if _status(jid) == "translating":
+    if _status(jid) == "translating" and not pending:
         store.update_stats(jid, finished=time.time())
         store.set_status(jid, "done", "แปลเสร็จแล้ว")
