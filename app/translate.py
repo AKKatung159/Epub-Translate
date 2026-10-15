@@ -27,6 +27,9 @@ P_RE = re.compile(r"\[\[(\d+)\]\](.*?)\[\[/\1\]\]", re.S)
 LOOP_RE = re.compile(r"(.{6,40}?)\1{4,}", re.S)
 ENGLISH_RUN = re.compile(r"(?:\b[A-Za-z]{2,}\b[\s,;:'’\-]+){3,}\b[A-Za-z]{2,}\b")   # 4+ English words in a row
 JUNK = re.compile(r"\s*\[\[/?\d+\]\](?:\.{3}|…)?\s*")                                  # stray [[N]] / "[[1]]..."
+BAD_VOID = re.compile(r"\[/(\d+)/\]")                                                   # "[/4/]" -> "[4/]"
+ALTERNATIVES = re.compile(r"(ครับ|ค่ะ|คะ|เขา|เธอ|ผม|ฉัน|ดิฉัน)\s*/\s*(ครับ|ค่ะ|คะ|เขา|เธอ|ผม|ฉัน|ดิฉัน)")
+SPAN_RE = re.compile(r"\[(\d+)\](.*?)\[/\1\]", re.S)
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 SIMPLIFIED = "รูปแบบตัวเอียง/ลิงก์บางส่วนหายไป"
 
@@ -43,6 +46,8 @@ BASE_RULES = [
     "Transliterate other proper nouns following the Royal Institute (ราชบัณฑิตยสถาน) transliteration rules; "
     "use Royal Institute coined terms for technical words, or transliterate when there is none.",
     "Do not add explanations, notes or anything that is not in the source.",
+    "Choose one Thai form every time: never write alternatives such as ครับ/ค่ะ or เขา/เธอ; pick the particle and "
+    "pronoun that fit the speaker.",
 ]
 PARA_RULE, MARK_RULE = 1, 2          # indexes into BASE_RULES
 
@@ -90,8 +95,18 @@ def _max_tokens(chars: int) -> int:
 
 
 def _clean(text: str) -> str:
-    """Remove stray [[N]] paragraph markers / '[[1]]...' placeholders, and use Arabic digits."""
-    return JUNK.sub(" ", text).strip().translate(THAI_DIGITS)
+    """Remove stray [[N]] paragraph markers / '[[1]]...' placeholders, fix '[/4/]', and use Arabic digits."""
+    return BAD_VOID.sub(r"[\1/]", JUNK.sub(" ", text).strip()).translate(THAI_DIGITS)
+
+
+def untranslated_spans(src_marked: str, out: str, keep_english: tuple[str, ...] = ()) -> str | None:
+    """An italic/link span that came back exactly as the English source ("[1]very[/1]") was not translated."""
+    src = {n: TAG_RE.sub("", t).strip() for n, t in SPAN_RE.findall(src_marked)}
+    for n, t in SPAN_RE.findall(out):
+        t = TAG_RE.sub("", t).strip()
+        if t and t == src.get(n) and LATIN.search(t) and t not in keep_english and not THAI.search(t):
+            return f"italic/link text left in English: {t[:40]}"
+    return None
 
 
 def _simplified(marked: str, out: str) -> str:
@@ -123,6 +138,8 @@ def qa(src_plain: str, out_marked: str, keep_english: tuple[str, ...] = ()) -> s
         return f"length ratio {ratio:.2f}"
     if LOOP_RE.search(text):
         return "repetition loop"
+    if ALTERNATIVES.search(text):
+        return "two alternatives written: " + ALTERNATIVES.search(text).group(0)
     return None
 
 
@@ -158,7 +175,8 @@ def translate_chunk(segs: list[SegIn], glossary_find, style_notes: str, stats) -
                 retry.append(s)
                 continue
             out = fix_glossary(_clean(out), hits)
-            if qa(s.plain, out, _keep(hits)) or check_tags(s.marked, out):
+            if (qa(s.plain, out, _keep(hits)) or untranslated_spans(s.marked, out, _keep(hits))
+                    or check_tags(s.marked, out)):
                 retry.append(s)
             else:
                 results[s.id] = SegOut(s.id, out, "done")
@@ -180,7 +198,7 @@ def translate_one(s: SegIn, glossary_find, style_notes: str, stats) -> SegOut:
                          max_tokens=_max_tokens(len(s.marked)), temperature=temperature)
         stats(reply)
         out = fix_glossary(_clean(reply.text), hits)
-        problem = qa(s.plain, out, _keep(hits))
+        problem = qa(s.plain, out, _keep(hits)) or untranslated_spans(s.marked, out, _keep(hits))
         if problem:
             last_out, last_problem = out, problem
             continue

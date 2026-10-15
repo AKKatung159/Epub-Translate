@@ -64,6 +64,30 @@ def test_glossary_rule_and_fixup(monkeypatch):
     assert out[0].marked.startswith("อลิซ") and out[0].status == "done"
 
 
+def test_untranslated_italic_is_retried(monkeypatch):
+    seg = SegIn(1, "There was nothing so [1]very[/1] remarkable in that, nor did Alice think it strange at all.",
+                "There was nothing so very remarkable in that, nor did Alice think it strange at all.")
+    left = "ไม่มีอะไรที่ [1]very[/1] น่าสังเกตในเรื่องนั้น และอลิซก็ไม่ได้คิดว่ามันแปลกเลย"
+    good = "ไม่มีอะไรที่น่าสังเกต[1]นัก[/1]ในเรื่องนั้น และอลิซก็ไม่ได้คิดว่ามันแปลกเลย"
+    out, calls = run(monkeypatch, [seg], [f"[[1]]{left}[[/1]]", good])
+    assert out[0].status == "done" and out[0].marked == good and len(calls) == 2
+
+
+def test_alternatives_and_bad_void(monkeypatch):
+    assert "alternatives" in qa(LONG, THAI_OK + " ขออนุญาตนะครับ/ค่ะ")
+    out, _ = run(monkeypatch, [SegIn(1, "Go [4/] now. " + LONG, "Go now. " + LONG)], [f"[[1]]ไป[/4/]เดี๋ยวนี้ {THAI_OK}[[/1]]"])
+    assert "[4/]" in out[0].marked and "[/4/]" not in out[0].marked
+
+
+def test_glossary_candidates_skip_one_offs_and_possessives():
+    from app.glossary import candidates
+    texts = ["Then Maia spoke to Csevet.", "Maia smiled at Csevet again.", "And pour the waters of the Nile",
+             "On every golden scale!", "We read Alice's Adventures twice.", "Alice's Adventures were long."]
+    names = [c.en for c in candidates([" ".join(t.split()) for t in texts] + ["the Nile On every scale"], 50)]
+    assert "Maia" in names and "Csevet" in names
+    assert "Nile On" not in names and not any("'s" in n for n in names)
+
+
 def test_qa_rules():
     assert qa(LONG, THAI_OK) is None
     assert qa(LONG, "") == "empty"

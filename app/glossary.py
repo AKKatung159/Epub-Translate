@@ -60,13 +60,16 @@ def candidates(texts: list[str], limit: int) -> list[Candidate]:
             if not phrase:
                 continue
             words = phrase.split()
+            stripped = False
             while words and words[0].lower() in STOP:     # "The Emperor" -> "Emperor"
                 words = words[1:]
+                stripped = True
             if not words:
                 continue
             phrase = " ".join(words)
             caps[phrase] += 1
-            if not SENT_START.search(t[: m.start()][-3:] if m.start() else ""):
+            # "Then Maia ..." at a sentence start: "Maia" itself is not the first word, so it counts as mid-sentence
+            if stripped or not SENT_START.search(t[: m.start()][-3:] if m.start() else ""):
                 mid[phrase] += 1
             if phrase not in example and 20 < len(t) < 400:
                 example[phrase] = t
@@ -82,8 +85,10 @@ def candidates(texts: list[str], limit: int) -> list[Candidate]:
             continue                  # shouted sentences / licence boilerplate, not names
         if " " not in phrase and lower_words[low] > 3 * mid[phrase]:
             continue                  # a normal word that is sometimes capitalised
-        if n < 2 and " " not in phrase:
-            continue
+        if n < 2:
+            continue                  # once only: often two capitalised words meeting by chance ("Nile On" in a poem)
+        if re.search(r"[’']s\b", phrase):
+            continue                  # "Alice's Adventures": a possessive phrase, not one name
         out.append(Candidate(phrase, n, _trim(example.get(phrase, ""), phrase)))
     out.sort(key=lambda c: -c.count)
     return out[:limit]
