@@ -2,88 +2,121 @@
 <html lang="th">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
 <title>แปลหนังสือ EPUB</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'>ก</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232b4fc7'/><path d='M9 8h6a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5H9z M23 8h-3a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5H23z' fill='white'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Noto+Serif+Thai:wght@400;500&display=swap">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5zM20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+</svg>
+
 <header class="top">
-  <div class="brand"><span class="logo">ก</span> แปลหนังสือ EPUB <span class="muted">อังกฤษ → ไทย</span></div>
-  <div id="health" class="pill">กำลังเช็กเครื่องโมเดล…</div>
+  <div class="top-inner">
+    <a class="brand" href="/" aria-label="หน้าแรก">
+      <span class="logo"><svg><use href="#i-book"/></svg></span>
+      <span class="brand-text">แปลหนังสือ <span class="brand-sub">EPUB · อังกฤษ → ไทย</span></span>
+    </a>
+    <div id="health" class="pill" role="status">กำลังเช็กเครื่องโมเดล…</div>
+  </div>
 </header>
 
 <main>
-  <section id="list-view">
+  <!-- ======================================================================== list -->
+  <section id="list-view" class="list-grid">
     <div class="card upload">
       <h2>เพิ่มหนังสือ</h2>
       <label id="drop" class="drop">
         <input id="file" type="file" accept=".epub,application/epub+zip" hidden>
-        <div class="drop-icon">📖</div>
-        <div><b>ลากไฟล์ .epub มาวาง</b> หรือคลิกเพื่อเลือก</div>
-        <div id="file-name" class="muted"></div>
+        <span class="drop-icon"><svg><use href="#i-upload"/></svg></span>
+        <span class="drop-title">ลากไฟล์ .epub มาวาง</span>
+        <span class="drop-sub">หรือแตะเพื่อเลือกไฟล์</span>
+        <span id="file-name" class="file-name"></span>
       </label>
       <div class="opts">
-        <label><input type="checkbox" id="opt-bilingual"> ฉบับสองภาษา (อังกฤษคู่ไทย ทีละย่อหน้า)</label>
-        <label><input type="checkbox" id="opt-auto"> ข้ามขั้นตรวจ glossary (แปลต่อทันที)</label>
-        <label class="full">หมายเหตุสไตล์การแปล (ไม่บังคับ บรรทัดละข้อ)
-          <textarea id="opt-notes" rows="3" placeholder="เช่น&#10;ตัวละครพูดกับจักรพรรดิให้ใช้ราชาศัพท์&#10;ใช้สรรพนาม 'ข้า/เจ้า' ในบทสนทนาของขุนนาง"></textarea>
-        </label>
+        <label class="switch"><input type="checkbox" id="opt-bilingual"><span class="track"></span>
+          <span class="switch-text">ฉบับสองภาษา<small>อังกฤษคู่ไทยทีละย่อหน้า</small></span></label>
+        <label class="switch"><input type="checkbox" id="opt-auto"><span class="track"></span>
+          <span class="switch-text">ข้ามขั้นตรวจ glossary<small>แปลต่อทันทีหลังหาคำเฉพาะ</small></span></label>
+        <details class="more">
+          <summary>หมายเหตุสไตล์การแปล</summary>
+          <textarea id="opt-notes" rows="3" placeholder="บรรทัดละข้อ เช่น&#10;ตัวละครพูดกับจักรพรรดิให้ใช้ราชาศัพท์&#10;Carl เป็นผู้ชาย พูดแบบกันเอง"></textarea>
+        </details>
       </div>
       <div id="upload-bar" class="bar hidden"><div></div></div>
-      <button id="upload" class="primary" disabled>อัปโหลดและเริ่ม</button>
+      <button id="upload" class="primary block" disabled>อัปโหลดและเริ่ม</button>
       <div id="upload-msg" class="msg"></div>
     </div>
 
-    <div class="card">
-      <h2>งานแปล</h2>
-      <div id="jobs"><div class="muted">ยังไม่มีงาน</div></div>
+    <div class="card jobs-card">
+      <div class="card-head"><h2>งานแปล</h2></div>
+      <div id="jobs"></div>
     </div>
   </section>
 
+  <!-- ======================================================================== job -->
   <section id="job-view" class="hidden">
-    <button class="link" id="back">← กลับ</button>
-    <div class="card">
-      <div class="row between">
-        <h2 id="job-name"></h2>
-        <span id="job-status" class="badge"></span>
+    <button class="back" id="back"><svg><use href="#i-back"/></svg>งานทั้งหมด</button>
+
+    <div class="card hero">
+      <div class="hero-head">
+        <h1 id="job-name"></h1>
+        <span id="job-status" class="chip"></span>
       </div>
       <ol class="steps" id="steps">
-        <li data-s="parsed">อ่านไฟล์</li><li data-s="glossary">หาคำเฉพาะ</li><li data-s="review">ตรวจ glossary</li>
-        <li data-s="translating">แปล</li><li data-s="done">เสร็จ</li>
+        <li><span class="dot"></span>อ่านไฟล์</li><li><span class="dot"></span>หาคำเฉพาะ</li><li><span class="dot"></span>ตรวจ glossary</li>
+        <li><span class="dot"></span>แปล</li><li><span class="dot"></span>เสร็จ</li>
       </ol>
-      <div id="job-msg" class="msg"></div>
+      <div class="progress-row">
+        <span class="pct" id="job-pct">0%</span>
+        <span class="eta" id="job-eta"></span>
+      </div>
       <div class="bar big" id="job-bar"><div></div><span></span></div>
+      <div id="job-msg" class="msg"></div>
       <div class="stats" id="job-stats"></div>
-      <div class="actions" id="job-actions"></div>
+      <div class="action-area">
+        <div class="actions" id="job-actions"></div>
+        <div class="actions-more" id="job-more"></div>
+      </div>
     </div>
 
-    <nav class="tabs" id="tabs">
-      <button data-tab="glossary" class="active">Glossary</button>
-      <button data-tab="flagged">ย่อหน้าที่ต้องตรวจ <span id="flag-count" class="count"></span></button>
-      <button data-tab="preview">ดูตัวอย่างรายบท</button>
-      <button data-tab="settings">ตั้งค่า</button>
+    <nav class="tabs" id="tabs" role="tablist">
+      <button data-tab="glossary" class="active" role="tab">Glossary</button>
+      <button data-tab="flagged" role="tab">ต้องตรวจ <span id="flag-count" class="count"></span></button>
+      <button data-tab="preview" role="tab">ดูรายบท</button>
+      <button data-tab="settings" role="tab">ตั้งค่า</button>
     </nav>
 
     <div class="card tab" id="tab-glossary">
       <details class="profile" id="g-profile-box" open>
-        <summary><b>ข้อมูลหนังสือ</b> <span class="muted small">แนวเรื่อง ฉาก ระดับภาษา ผู้เล่า (ร่างอัตโนมัติ แก้ได้ ใช้เป็นกฎกับทั้งเล่ม)</span></summary>
+        <summary><span class="summary-title">ข้อมูลหนังสือ</span><span class="summary-sub">แนวเรื่อง ฉาก ระดับภาษา ผู้เล่า · ใช้เป็นกฎกับทั้งเล่ม</span></summary>
         <textarea id="g-profile" rows="5" placeholder="ยังไม่มี (สร้างตอนทำ glossary)"></textarea>
-        <div class="row"><button id="g-profile-save">บันทึกข้อมูลหนังสือ</button><span id="g-profile-msg" class="msg small"></span></div>
+        <div class="row"><button id="g-profile-save" class="ghost">บันทึกข้อมูลหนังสือ</button><span id="g-profile-msg" class="msg small"></span></div>
       </details>
-      <div class="row wrap">
-        <input id="g-search" placeholder="ค้นหาคำ…">
+
+      <div class="toolbar">
+        <label class="search"><svg><use href="#i-search"/></svg><input id="g-search" placeholder="ค้นหาคำ…" type="search"></label>
         <select id="g-type"><option value="">ทุกประเภท</option></select>
-        <button id="g-add">+ เพิ่มคำ</button>
+        <button id="g-add" class="ghost">+ เพิ่มคำ</button>
         <span class="grow"></span>
         <button id="g-save">บันทึก</button>
         <button id="g-start" class="primary hidden">บันทึกและเริ่มแปล</button>
       </div>
-      <p class="muted small">ชื่อคน/สถานที่ใช้คำไทยนี้ทุกจุดในเล่ม · ติ๊ก "คงอังกฤษ" สำหรับคำที่ไม่ควรแปล · ชี้ที่คำเพื่อดูประโยคตัวอย่าง<br>
-        ตัวละคร: เพศ คำลงท้าย และคำแทนตัว ใช้กำหนดบทพูดทุกครั้งที่ตัวละครนั้นปรากฏ ·
-        เพิ่มคำธรรมดาตัวพิมพ์เล็กได้ เช่น <code>sister</code> → พี่สาว, <code>fan</code> → พัด (ใช้กับทั้งเล่ม)</p>
+      <p class="hint">ชื่อและคำในตารางใช้คำไทยนี้ทุกจุดในเล่ม · ตัวละคร: เพศ คำลงท้าย และคำแทนตัว กำหนดบทพูดทุกครั้งที่ตัวละครปรากฏ ·
+        เพิ่มคำธรรมดาตัวพิมพ์เล็กได้ เช่น <code>sister</code> → พี่สาว · ชี้ที่คำเพื่อดูประโยคตัวอย่าง</p>
       <div class="table-wrap"><table id="g-table">
-        <thead><tr><th>อังกฤษ</th><th>ประเภท</th><th>ไทย</th><th>คงอังกฤษ</th><th>พบ</th>
+        <thead><tr><th>อังกฤษ</th><th>ประเภท</th><th>ไทย</th><th title="คงเป็นภาษาอังกฤษ">EN</th><th>พบ</th>
           <th>เพศ</th><th>คำลงท้าย</th><th>แทนตัว</th><th>บทบาท</th><th>คนอื่นเรียก</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
@@ -91,29 +124,31 @@
     </div>
 
     <div class="card tab hidden" id="tab-flagged">
-      <p class="muted small">ย่อหน้าที่ตรวจไม่ผ่าน (แปลไม่ครบ ยาวผิดปกติ รูปแบบตัวเอียง/ลิงก์หาย) แก้เองหรือกดแปลใหม่ได้ · เครื่องหมายอย่าง [1]…[/1] หรือ [2/] คือตัวเอียง/ลิงก์/ขึ้นบรรทัดใหม่ ให้คงไว้</p>
+      <p class="hint">ย่อหน้าที่ตรวจไม่ผ่าน แก้เองหรือกดแปลใหม่ได้ · เครื่องหมาย [1]…[/1] หรือ [2/] คือตัวเอียง ลิงก์ หรือขึ้นบรรทัดใหม่ ให้คงไว้</p>
       <div id="flagged"></div>
       <div class="pager" id="flag-pager"></div>
     </div>
 
     <div class="card tab hidden" id="tab-preview">
-      <div class="row"><select id="p-doc"></select></div>
+      <select id="p-doc" class="doc-select"></select>
       <div id="preview"></div>
       <div class="pager" id="p-pager"></div>
     </div>
 
     <div class="card tab hidden" id="tab-settings">
-      <label><input type="checkbox" id="s-bilingual"> ไฟล์ที่ดาวน์โหลดเป็นฉบับสองภาษา</label>
-      <label class="full">หมายเหตุสไตล์การแปล (ใช้กับย่อหน้าที่ยังไม่ได้แปล)
+      <label class="switch"><input type="checkbox" id="s-bilingual"><span class="track"></span>
+        <span class="switch-text">ดาวน์โหลดเป็นฉบับสองภาษา<small>ภาษาอังกฤษสีจางเหนือภาษาไทยทีละย่อหน้า</small></span></label>
+      <label class="field">หมายเหตุสไตล์การแปล <small>ใช้กับย่อหน้าที่ยังไม่ได้แปล</small>
         <textarea id="s-notes" rows="4"></textarea></label>
-      <button id="s-save">บันทึก</button>
-      <div id="s-msg" class="msg"></div>
-      <hr>
-      <button id="s-regloss">ทำ glossary ใหม่ทั้งหมด</button>
-      <button id="s-delete" class="danger">ลบงานนี้</button>
+      <div class="row"><button id="s-save">บันทึก</button><span id="s-msg" class="msg"></span></div>
+      <div class="danger-zone">
+        <button id="s-regloss" class="ghost">ทำ glossary ใหม่ทั้งหมด</button>
+        <button id="s-delete" class="danger">ลบงานนี้</button>
+      </div>
     </div>
   </section>
 </main>
+<div id="toasts" aria-live="polite"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

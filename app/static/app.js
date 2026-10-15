@@ -22,6 +22,15 @@ async function api(path, opts = {}) {
   return r.headers.get("content-type")?.includes("json") ? r.json() : r;
 }
 
+function toast(text, kind = "") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.textContent = text;
+  $("#toasts").appendChild(t);
+  setTimeout(() => t.remove(), kind === "err" ? 5000 : 2600);
+}
+const icon = (id) => `<svg><use href="#i-${id}"/></svg>`;
+
 function fmtDur(s) {
   if (s == null) return "–";
   s = Math.max(0, Math.round(s));
@@ -76,6 +85,7 @@ $("#upload").onclick = () => {
     if (xhr.status === 200) {
       const job = JSON.parse(xhr.responseText);
       msg.textContent = ""; pickedFile = null; $("#file-name").textContent = ""; $("#file").value = "";
+      toast("อัปโหลดแล้ว กำลังหาคำเฉพาะ");
       openJob(job.id);
     } else {
       let d = xhr.statusText; try { d = JSON.parse(xhr.responseText).detail; } catch {}
@@ -90,13 +100,21 @@ $("#upload").onclick = () => {
 async function loadJobs() {
   const jobs = await api("/api/jobs");
   const box = $("#jobs");
-  if (!jobs.length) { box.innerHTML = '<div class="muted">ยังไม่มีงาน</div>'; return; }
-  box.innerHTML = jobs.map((j) => `
-    <div class="job" data-id="${j.id}">
-      <div><b>${esc(j.name)}</b><div class="muted small">${esc(j.message || "")}</div></div>
-      <div><span class="badge">${STATUS[j.status] || j.status}</span> <b>${j.percent}%</b></div>
+  if (!jobs.length) {
+    box.innerHTML = `<div class="empty">${icon("book")}<b>ยังไม่มีงานแปล</b><span>เพิ่มไฟล์ .epub ทางซ้ายเพื่อเริ่ม</span></div>`;
+    return;
+  }
+  box.innerHTML = jobs.map((j) => {
+    const meta = j.status === "translating" && j.eta_seconds != null ? `เหลือประมาณ ${fmtDur(j.eta_seconds)}` : (j.message || "");
+    return `
+    <div class="job" data-id="${j.id}" role="button" tabindex="0">
+      <div class="job-title">${esc(j.name)}</div>
+      <div class="job-side"><span class="chip" data-s="${j.status}">${STATUS[j.status] || j.status}</span><span class="job-pct">${j.percent}%</span></div>
+      <div class="job-meta">${esc(meta)}</div>
       <div class="bar"><div style="width:${j.percent}%"></div></div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".job").forEach((el) => (el.onkeydown = (e) => { if (e.key === "Enter") openJob(el.dataset.id); }));
   box.querySelectorAll(".job").forEach((el) => (el.onclick = () => openJob(el.dataset.id)));
 }
 
@@ -108,9 +126,10 @@ function openJob(id) {
   current = id; glossary = []; glossaryDirty = false;
   location.hash = id;
   $("#list-view").classList.add("hidden"); $("#job-view").classList.remove("hidden");
+  window.scrollTo(0, 0);
   refreshJob().then(() => showTab(currentJob?.status === "done" || currentJob?.status === "translating" ? "preview" : "glossary"));
 }
-$("#back").onclick = () => { current = null; location.hash = ""; $("#job-view").classList.add("hidden"); $("#list-view").classList.remove("hidden"); loadJobs(); };
+$("#back").onclick = () => { current = null; location.hash = ""; document.title = "แปลหนังสือ EPUB"; $("#job-view").classList.add("hidden"); $("#list-view").classList.remove("hidden"); loadJobs(); };
 
 async function refreshJob() {
   if (!current) return;
@@ -119,30 +138,36 @@ async function refreshJob() {
   const prev = currentJob?.status;
   currentJob = j;
   $("#job-name").textContent = j.name;
+  document.title = `${j.percent}% · ${j.name}`;
   $("#job-status").textContent = STATUS[j.status] || j.status;
+  $("#job-status").dataset.s = j.status;
   const step = STEP_OF[j.status] ?? 0;
   document.querySelectorAll("#steps li").forEach((li, i) => { li.className = i < step || j.status === "done" ? "done" : i === step ? "now" : ""; });
   $("#job-msg").textContent = j.message || "";
   $("#job-msg").className = "msg" + (j.status === "error" ? " err" : "");
   const bar = $("#job-bar");
-  if (j.status === "glossary" && j.glossary_progress?.[1]) {
+  const inGlossary = j.status === "glossary";
+  if (inGlossary && j.glossary_progress?.[1]) {
     const [d, t] = j.glossary_progress;
     bar.firstElementChild.style.width = (100 * d / t) + "%";
-    bar.lastElementChild.textContent = `glossary ${d}/${t}`;
+    $("#job-pct").textContent = `${Math.round(100 * d / t)}%`;
   } else {
     bar.firstElementChild.style.width = j.percent + "%";
-    bar.lastElementChild.textContent = `${j.percent}%`;
+    $("#job-pct").textContent = `${j.percent}%`;
   }
-  bar.classList.toggle("indeterminate", j.status === "glossary" && !j.glossary_progress?.[1]);
+  bar.classList.toggle("indeterminate", inGlossary && !j.glossary_progress?.[1]);
+  $("#job-eta").textContent = inGlossary ? "กำลังทำ glossary"
+    : j.eta_seconds != null && ["translating", "queued", "waiting"].includes(j.status) ? `เหลือประมาณ ${fmtDur(j.eta_seconds)}`
+    : j.status === "done" ? "แปลครบแล้ว" : "";
   const elapsed = j.started ? ((j.finished || Date.now() / 1000) - j.started) : null;
+  const stat = (label, value, cls = "") => `<div class="stat ${cls}"><span class="stat-label">${label}</span><span class="stat-value" title="${esc(value)}">${value}</span></div>`;
   $("#job-stats").innerHTML = [
-    `ย่อหน้า <b>${j.done + j.flagged}/${j.segments}</b>`,
-    `ต้องตรวจ <b>${j.flagged}</b>`,
-    `glossary <b>${j.glossary_terms}</b> คำ`,
-    j.chars_per_sec ? `ความเร็ว <b>${j.chars_per_sec}</b> ตัวอักษร/วินาที${j.gen_tps ? ` (${j.gen_tps} tok/s)` : ""}` : "",
-    j.eta_seconds != null ? `เหลือประมาณ <b>${fmtDur(j.eta_seconds)}</b>` : "",
-    elapsed ? `ใช้ไป <b>${fmtDur(elapsed)}</b>` : "",
-    j.current_doc && j.status === "translating" ? `บท <b>${esc(j.current_doc)}</b>` : "",
+    stat("ย่อหน้า", `${j.done + j.flagged} / ${j.segments}`),
+    stat("ต้องตรวจ", j.flagged, j.flagged ? "warn" : ""),
+    stat("Glossary", `${j.glossary_terms} คำ`),
+    j.chars_per_sec ? stat("ความเร็ว", `${j.chars_per_sec} ตัวอักษร/วิ`) : "",
+    elapsed ? stat("ใช้เวลาไป", fmtDur(elapsed)) : "",
+    j.current_doc && j.status === "translating" ? stat("กำลังแปล", esc(j.current_doc)) : "",
   ].filter(Boolean).join("");
   $("#flag-count").textContent = j.flagged || "";
   renderActions(j);
@@ -154,21 +179,25 @@ async function refreshJob() {
 }
 
 function renderActions(j) {
-  const a = [];
-  const btn = (label, fn, cls = "") => a.push(`<button class="${cls}" data-fn="${fn}">${label}</button>`);
+  const a = [], more = [];
+  // main actions (bottom bar on phones) vs occasional ones (stay in the card)
+  const btn = (label, fn, cls = "") => (["dl-bi", "retry-flagged", "cancel"].includes(fn) ? more : a)
+    .push(`<button class="${cls}" data-fn="${fn}">${label}</button>`);
+  // primary action first: it gets the most room in the bottom bar on phones
   if (j.status === "review") btn("เริ่มแปล", "start", "primary");
-  if (["queued", "translating", "waiting", "glossary"].includes(j.status)) btn("หยุดชั่วคราว", "pause");
   if (j.status === "paused") btn("ทำต่อ", "resume", "primary");
   if (["error", "cancelled"].includes(j.status)) btn("ลองใหม่", "start", "primary");
-  if (j.flagged && ["done", "paused", "review", "error"].includes(j.status)) btn(`แปลใหม่ ${j.flagged} ย่อหน้าที่มีปัญหา`, "retry-flagged");
+  if (j.status === "done") btn(`${icon("download")}ดาวน์โหลด EPUB ไทย`, "dl", "primary");
+  if (["queued", "translating", "waiting", "glossary"].includes(j.status)) btn("หยุดชั่วคราว", "pause");
   if (j.done + j.flagged > 0) {
-    btn(j.status === "done" ? "⬇ ดาวน์โหลด EPUB ไทย" : "⬇ ดาวน์โหลด (เท่าที่แปลแล้ว)", "dl", j.status === "done" ? "primary" : "");
-    btn("⬇ ฉบับสองภาษา", "dl-bi");
+    if (j.status !== "done") btn(`${icon("download")}เท่าที่แปลแล้ว`, "dl");
+    btn(`${icon("download")}สองภาษา`, "dl-bi");
   }
+  if (j.flagged && ["done", "paused", "review", "error"].includes(j.status)) btn(`แปลใหม่ ${j.flagged} ย่อหน้า`, "retry-flagged");
   if (!["done", "cancelled"].includes(j.status)) btn("ยกเลิก", "cancel", "danger");
-  const box = $("#job-actions");
-  box.innerHTML = a.join("");
-  box.querySelectorAll("button").forEach((b) => (b.onclick = () => action(b.dataset.fn)));
+  $("#job-actions").innerHTML = a.join("");
+  $("#job-more").innerHTML = more.join("");
+  document.querySelectorAll("#job-actions button, #job-more button").forEach((b) => (b.onclick = () => action(b.dataset.fn)));
 }
 
 async function action(fn) {
@@ -180,8 +209,10 @@ async function action(fn) {
     if (fn === "cancel" && !confirm("ยกเลิกงานนี้? ย่อหน้าที่แปลแล้วยังอยู่ ดาวน์โหลดได้")) return;
     if (fn === "start" && glossaryDirty) await saveGlossary();
     await api(`/api/jobs/${current}/${fn}`, { method: "POST" });
+    toast({ start: "เริ่มแปลแล้ว", pause: "หยุดชั่วคราวแล้ว", resume: "ทำต่อแล้ว", cancel: "ยกเลิกแล้ว",
+            "retry-flagged": "กำลังแปลย่อหน้าที่มีปัญหาใหม่", "regenerate-glossary": "กำลังทำ glossary ใหม่" }[fn] || "เรียบร้อย");
     refreshJob();
-  } catch (e) { $("#job-msg").className = "msg err"; $("#job-msg").textContent = e.message; }
+  } catch (e) { toast(e.message, "err"); }
 }
 
 // ------------------------------------------------------------------------------------------- tabs
@@ -254,7 +285,8 @@ async function saveGlossary() {
   }));
   const r = await api(`/api/jobs/${current}/glossary`, { method: "PUT", body: JSON.stringify(terms) });
   glossaryDirty = false;
-  $("#g-msg").textContent = `บันทึกแล้ว ${r.terms} คำ`;
+  $("#g-msg").textContent = "";
+  toast(`บันทึก glossary แล้ว ${r.terms} คำ`);
   await loadGlossary();
 }
 $("#g-profile").oninput = () => { $("#g-profile").dataset.dirty = "1"; $("#g-profile-msg").textContent = "ยังไม่ได้บันทึก"; };
@@ -262,17 +294,18 @@ $("#g-profile-save").onclick = async () => {
   try {
     await api(`/api/jobs/${current}`, { method: "PATCH", body: JSON.stringify({ book_profile: $("#g-profile").value }) });
     delete $("#g-profile").dataset.dirty;
-    $("#g-profile-msg").textContent = "บันทึกแล้ว ใช้กับย่อหน้าที่ยังไม่ได้แปล";
+    $("#g-profile-msg").textContent = "";
+    toast("บันทึกข้อมูลหนังสือแล้ว ใช้กับย่อหน้าที่ยังไม่ได้แปล");
     refreshJob();
-  } catch (e) { $("#g-profile-msg").textContent = e.message; }
+  } catch (e) { toast(e.message, "err"); }
 };
-$("#g-save").onclick = () => saveGlossary().catch((e) => ($("#g-msg").textContent = e.message));
+$("#g-save").onclick = () => saveGlossary().catch((e) => toast(e.message, "err"));
 $("#g-start").onclick = async () => { await saveGlossary(); await action("start"); };
 
 // ------------------------------------------------------------------------------------------- flagged
 async function loadFlagged(offset) {
   const r = await api(`/api/jobs/${current}/segments?status=flagged&offset=${offset}&limit=20`);
-  $("#flagged").innerHTML = r.items.length ? r.items.map(segHtml).join("") : '<div class="muted">ไม่มีย่อหน้าที่ต้องตรวจ 🎉</div>';
+  $("#flagged").innerHTML = r.items.length ? r.items.map(segHtml).join("") : `<div class="empty">${icon("check")}<b>ไม่มีย่อหน้าที่ต้องตรวจ</b><span>ทุกย่อหน้าผ่านการตรวจแล้ว</span></div>`;
   bindSegs($("#flagged"), () => loadFlagged(offset));
   pager($("#flag-pager"), r.total, offset, 20, loadFlagged);
 }
@@ -292,13 +325,13 @@ function bindSegs(box, reload) {
     const id = el.dataset.id, msg = el.querySelector(".msg");
     const save = el.querySelector("[data-save]"), re = el.querySelector("[data-re]");
     if (save) save.onclick = async () => {
-      try { await api(`/api/jobs/${current}/segments/${id}`, { method: "PUT", body: JSON.stringify({ out: el.querySelector("textarea").value }) }); reload(); refreshJob(); }
-      catch (e) { msg.textContent = e.message; }
+      try { await api(`/api/jobs/${current}/segments/${id}`, { method: "PUT", body: JSON.stringify({ out: el.querySelector("textarea").value }) }); toast("บันทึกย่อหน้าแล้ว"); reload(); refreshJob(); }
+      catch (e) { toast(e.message, "err"); }
     };
     if (re) re.onclick = async () => {
       msg.textContent = "กำลังแปลใหม่…"; re.disabled = true;
-      try { await api(`/api/jobs/${current}/segments/${id}/retranslate`, { method: "POST" }); reload(); refreshJob(); }
-      catch (e) { msg.textContent = e.message; re.disabled = false; }
+      try { await api(`/api/jobs/${current}/segments/${id}/retranslate`, { method: "POST" }); toast("แปลใหม่แล้ว"); reload(); refreshJob(); }
+      catch (e) { toast(e.message, "err"); msg.textContent = ""; re.disabled = false; }
     };
   });
 }
@@ -318,6 +351,12 @@ async function loadDocs() {
   const sel = $("#p-doc"), keep = sel.value;
   sel.innerHTML = docs.map((d) => `<option value="${esc(d.doc)}">${esc(d.title)} — ${d.done + d.flagged}/${d.n}${d.flagged ? ` (ตรวจ ${d.flagged})` : ""}</option>`).join("");
   if (keep && docs.some((d) => d.doc === keep)) sel.value = keep;
+  else {
+    // open where there is something to read: the chapter being translated, else the first with real text done
+    const now = docs.find((d) => d.title === currentJob?.current_doc && currentJob?.status === "translating");
+    const first = docs.find((d) => d.n > 2 && d.done + d.flagged > 0) || docs.find((d) => d.n > 2) || docs[0];
+    if (now || first) sel.value = (now || first).doc;
+  }
   previewOffset = 0;
   loadPreview(true);
 }
@@ -328,7 +367,9 @@ async function loadPreview(scroll) {
   const r = await api(`/api/jobs/${current}/segments?doc=${encodeURIComponent(doc)}&offset=${previewOffset}&limit=40`);
   const box = $("#preview");
   if (!scroll && box.querySelector("textarea:focus, details[open]")) return;   // don't disturb an edit in progress
-  box.innerHTML = r.items.filter((s) => s.kind !== "title").map(segHtml).join("");
+  const items = r.items.filter((s) => s.kind !== "title");
+  box.innerHTML = items.length ? items.map(segHtml).join("")
+    : `<div class="empty">${icon("book")}<b>บทนี้ไม่มีย่อหน้าให้แสดง</b><span>เลือกบทอื่นจากรายการด้านบน</span></div>`;
   bindSegs(box, () => loadPreview(false));
   pager($("#p-pager"), r.total, previewOffset, 40, (o) => { previewOffset = o; loadPreview(true); });
 }
@@ -337,8 +378,8 @@ async function loadPreview(scroll) {
 $("#s-save").onclick = async () => {
   try {
     await api(`/api/jobs/${current}`, { method: "PATCH", body: JSON.stringify({ bilingual: $("#s-bilingual").checked, style_notes: $("#s-notes").value }) });
-    $("#s-msg").textContent = "บันทึกแล้ว"; refreshJob();
-  } catch (e) { $("#s-msg").textContent = e.message; }
+    toast("บันทึกการตั้งค่าแล้ว"); refreshJob();
+  } catch (e) { toast(e.message, "err"); }
 };
 $("#s-regloss").onclick = () => confirm("ทำ glossary ใหม่? คำที่คุณแก้เองจะยังอยู่") && action("regenerate-glossary");
 $("#s-delete").onclick = async () => {
