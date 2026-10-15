@@ -2,7 +2,9 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const strip = (s) => String(s ?? "").replace(/\[\/?\d+\/?\]/g, "").replace(/⟦/g, "[").replace(/⟧/g, "]");
-const TYPES = { person: "ชื่อคน", place: "สถานที่", organization: "องค์กร/ตระกูล", title: "ยศ/ตำแหน่ง", term: "ศัพท์เฉพาะ" };
+const TYPES = { person: "ตัวละคร", place: "สถานที่", organization: "องค์กร/ตระกูล", title: "ยศ/ตำแหน่ง", term: "ศัพท์/คำทั่วไป" };
+const GENDERS = [["", "?"], ["female", "หญิง"], ["male", "ชาย"]];
+const PARTICLES = [["", "อัตโนมัติ"], ["ค่ะ/คะ", "ค่ะ/คะ"], ["ครับ", "ครับ"], ["none", "ไม่ใช้"]];
 const STATUS = {
   parsed: "อ่านไฟล์แล้ว", glossary: "กำลังทำ glossary", review: "รอตรวจ glossary", queued: "รอคิว",
   translating: "กำลังแปล", waiting: "รอเครื่องโมเดล", paused: "หยุดชั่วคราว", done: "เสร็จแล้ว",
@@ -145,6 +147,8 @@ async function refreshJob() {
   $("#flag-count").textContent = j.flagged || "";
   renderActions(j);
   $("#g-start").classList.toggle("hidden", j.status !== "review");
+  const prof = $("#g-profile");
+  if (document.activeElement !== prof && !prof.dataset.dirty) prof.value = j.options.book_profile || "";
   if (prev !== j.status && (j.status === "review" || prev === "glossary")) loadGlossary();
   if (tab === "preview" && j.status === "translating") loadPreview(false);
 }
@@ -207,23 +211,35 @@ function renderGlossary() {
   const tb = $("#g-table tbody");
   const rows = glossary.map((g, i) => [g, i]).filter(([g]) => (!q || g.en.toLowerCase().includes(q) || (g.th || "").includes(q)) && (!ty || g.type === ty));
   if (!glossary.length) {
-    tb.innerHTML = `<tr><td colspan="6" class="muted">${currentJob?.status === "glossary" ? "กำลังหาคำเฉพาะและเสนอคำแปล…" : "ยังไม่มีคำ"}</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="11" class="muted">${currentJob?.status === "glossary" ? "กำลังหาคำเฉพาะ ข้อมูลตัวละคร และเสนอคำแปล…" : "ยังไม่มีคำ"}</td></tr>`;
     return;
   }
-  tb.innerHTML = rows.map(([g, i]) => `
+  const sel = (k, val, opts) => `<select data-k="${k}">${opts.map(([v, l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  const txt = (k, val, ph, w) => `<input type="text" data-k="${k}" value="${esc(val || "")}" placeholder="${ph}" style="min-width:${w}px">`;
+  tb.innerHTML = rows.map(([g, i]) => {
+    const person = g.type === "person";
+    const ch = person ? `
+      <td>${sel("gender", g.gender || "", GENDERS)}</td>
+      <td>${sel("particle", g.particle || "", PARTICLES)}</td>
+      <td>${txt("self_pronoun", g.self_pronoun, "ฉัน/ผม/ข้า", 70)}</td>
+      <td>${txt("role", g.role, "เช่น จักรพรรดิ", 110)}</td>
+      <td>${txt("addressed_as", g.addressed_as, "เช่น ราชาศัพท์", 90)}</td>` : `<td colspan="5" class="muted small">—</td>`;
+    return `
     <tr data-i="${i}" class="${g.source === "user" ? "user" : ""}">
       <td class="en" title="${esc(g.example || "")}">${g.isNew ? `<input type="text" data-k="en" value="${esc(g.en)}" placeholder="คำอังกฤษ">` : esc(g.en)}</td>
       <td><select data-k="type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}" ${g.type === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
       <td><input type="text" data-k="th" value="${esc(g.th)}"></td>
       <td><input type="checkbox" data-k="keep_english" ${g.keep_english ? "checked" : ""}></td>
-      <td class="muted">${g.count || ""}</td>
+      <td class="muted">${g.count || ""}</td>${ch}
       <td><button class="link" data-del>ลบ</button></td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
   tb.querySelectorAll("tr[data-i]").forEach((tr) => {
     const g = glossary[+tr.dataset.i];
     tr.querySelectorAll("[data-k]").forEach((inp) => (inp.oninput = inp.onchange = () => {
       g[inp.dataset.k] = inp.type === "checkbox" ? inp.checked : inp.value;
       g.source = "user"; glossaryDirty = true; $("#g-msg").textContent = "ยังไม่ได้บันทึก";
+      if (inp.dataset.k === "type") renderGlossary();        // show / hide the character columns
     }));
     tr.querySelector("[data-del]").onclick = () => { glossary.splice(+tr.dataset.i, 1); glossaryDirty = true; renderGlossary(); };
   });
@@ -232,12 +248,24 @@ $("#g-search").oninput = renderGlossary;
 $("#g-type").onchange = renderGlossary;
 $("#g-add").onclick = () => { glossary.unshift({ en: "", type: "person", th: "", keep_english: false, isNew: true, source: "user" }); glossaryDirty = true; renderGlossary(); };
 async function saveGlossary() {
-  const terms = glossary.filter((g) => g.en.trim()).map(({ en, type, th, keep_english }) => ({ en, type, th, keep_english: !!keep_english }));
+  const terms = glossary.filter((g) => g.en.trim()).map((g) => ({
+    en: g.en, type: g.type, th: g.th, keep_english: !!g.keep_english, gender: g.gender || "", particle: g.particle || "",
+    self_pronoun: g.self_pronoun || "", role: g.role || "", addressed_as: g.addressed_as || "",
+  }));
   const r = await api(`/api/jobs/${current}/glossary`, { method: "PUT", body: JSON.stringify(terms) });
   glossaryDirty = false;
   $("#g-msg").textContent = `บันทึกแล้ว ${r.terms} คำ`;
   await loadGlossary();
 }
+$("#g-profile").oninput = () => { $("#g-profile").dataset.dirty = "1"; $("#g-profile-msg").textContent = "ยังไม่ได้บันทึก"; };
+$("#g-profile-save").onclick = async () => {
+  try {
+    await api(`/api/jobs/${current}`, { method: "PATCH", body: JSON.stringify({ book_profile: $("#g-profile").value }) });
+    delete $("#g-profile").dataset.dirty;
+    $("#g-profile-msg").textContent = "บันทึกแล้ว ใช้กับย่อหน้าที่ยังไม่ได้แปล";
+    refreshJob();
+  } catch (e) { $("#g-profile-msg").textContent = e.message; }
+};
 $("#g-save").onclick = () => saveGlossary().catch((e) => ($("#g-msg").textContent = e.message));
 $("#g-start").onclick = async () => { await saveGlossary(); await action("start"); };
 

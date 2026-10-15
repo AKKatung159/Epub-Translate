@@ -56,6 +56,11 @@ label { display: flex; gap: 8px; align-items: center; } label.full { flex-direct
 .tabs button.active { background: var(--card); border-color: var(--line); font-weight: 600; }
 .count { background: var(--warn); color: #fff; border-radius: 99px; padding: 0 7px; font-size: 12px; }
 .table-wrap { overflow-x: auto; }
+.profile { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.profile summary { cursor: pointer; }
+.profile textarea { margin: 8px 0; }
+td select { max-width: 120px; }
+code { font-size: 13px; background: var(--soft); padding: 0 4px; border-radius: 4px; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { border-bottom: 1px solid var(--line); padding: 5px 6px; text-align: left; vertical-align: middle; }
 td input[type=text] { width: 100%; min-width: 140px; }

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from . import llm
 from .config import settings
+from .characters import character_rule, gender_mismatch
 from .epub import TAG_RE, check_tags
 
 log = logging.getLogger("translate")
@@ -74,6 +75,10 @@ def _rules(glossary_hits: list[dict], style_notes: str, *, chunk: bool = True, m
             rules.append(f'Keep "{e["en"]}" in English.')
         elif e.get("th"):
             rules.append(f'Translate "{e["en"]}" as "{e["th"]}".')
+    for e in glossary_hits:                                  # who is speaking / being spoken to in this chunk
+        r = character_rule(e)
+        if r:
+            rules.append(r)
     for i, r in enumerate(BASE_RULES):
         if (i == PARA_RULE and not chunk) or (i == MARK_RULE and not marks):
             continue          # a single paragraph must not hear about [[N]] blocks, or it invents them
@@ -176,7 +181,7 @@ def translate_chunk(segs: list[SegIn], glossary_find, style_notes: str, stats) -
                 continue
             out = fix_glossary(_clean(out), hits)
             if (qa(s.plain, out, _keep(hits)) or untranslated_spans(s.marked, out, _keep(hits))
-                    or check_tags(s.marked, out)):
+                    or check_tags(s.marked, out) or gender_mismatch(out, with_cast(glossary_find(s.plain), hits))):
                 retry.append(s)
             else:
                 results[s.id] = SegOut(s.id, out, "done")
@@ -184,15 +189,23 @@ def translate_chunk(segs: list[SegIn], glossary_find, style_notes: str, stats) -
         retry = list(segs)
 
     for s in retry:
-        results[s.id] = translate_one(s, glossary_find, style_notes, stats)
+        results[s.id] = translate_one(s, glossary_find, style_notes, stats, context=hits)
     return [results[s.id] for s in segs]
 
 
-def translate_one(s: SegIn, glossary_find, style_notes: str, stats) -> SegOut:
-    hits = glossary_find(s.plain)
+def with_cast(para_hits: list[dict], chunk_hits: list[dict]) -> list[dict]:
+    """A paragraph that names nobody ("she said") belongs to the characters named around it in the chunk."""
+    if any(e.get("type") == "person" for e in para_hits):
+        return para_hits
+    return para_hits + [e for e in chunk_hits if e.get("type") == "person"]
+
+
+def translate_one(s: SegIn, glossary_find, style_notes: str, stats, context: list[dict] | None = None) -> SegOut:
+    hits = with_cast(glossary_find(s.plain), context or [])
     has_marks = bool(TAG_RE.search(s.marked))
     rules = _rules(hits, style_notes, chunk=False, marks=has_marks)
     simplified, last_out, last_problem = None, "", "no output"
+    soft: tuple[str, str] | None = None        # (text, note): fine except a possibly wrong ending particle
     for temperature in (0.2, 0.5):
         reply = llm.chat(settings.translate_model, _prompt(s.marked, rules),
                          max_tokens=_max_tokens(len(s.marked)), temperature=temperature)
@@ -202,9 +215,15 @@ def translate_one(s: SegIn, glossary_find, style_notes: str, stats) -> SegOut:
         if problem:
             last_out, last_problem = out, problem
             continue
-        if not check_tags(s.marked, out):
+        if check_tags(s.marked, out):
+            simplified = simplified or _simplified(s.marked, out)
+            continue
+        mismatch = gender_mismatch(out, hits)
+        if not mismatch:
             return SegOut(s.id, out, "done")
-        simplified = simplified or _simplified(s.marked, out)
+        soft = soft or (out, f"ตรวจคำลงท้าย: {mismatch}")
+    if soft:
+        return SegOut(s.id, soft[0], "done", soft[1])          # a quoted other speaker is possible: note, not flag
     if simplified is not None:
         return SegOut(s.id, simplified, "done", SIMPLIFIED)   # right words, some italics/links lost
 

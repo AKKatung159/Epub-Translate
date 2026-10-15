@@ -30,6 +30,16 @@ CREATE TABLE IF NOT EXISTS docs (
 );
 """
 
+# character sheet columns, added to existing databases on start
+GLOSSARY_EXTRA = {
+    "gender": "TEXT DEFAULT ''",          # male | female | '' (unknown / not a person)
+    "role": "TEXT DEFAULT ''",            # short description: emperor, little girl, servant ...
+    "particle": "TEXT DEFAULT ''",        # ending particle when the character speaks: ค่ะ/คะ | ครับ | none | ''
+    "self_pronoun": "TEXT DEFAULT ''",    # how the character says "I": ฉัน, ผม, ข้า, กระหม่อม ...
+    "addressed_as": "TEXT DEFAULT ''",    # how others speak to them: ราชาศัพท์, ท่าน, คุณ ...
+}
+GLOSSARY_COLS = ["en", "type", "th", "keep_english", "count", "example", "source", *GLOSSARY_EXTRA]
+
 # status flow: parsed -> glossary -> review -> queued -> translating -> done
 #              (paused / waiting / cancelled / error at any point)
 
@@ -41,6 +51,10 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        have = {r["name"] for r in self.db.execute("PRAGMA table_info(glossary)")}
+        for col, decl in GLOSSARY_EXTRA.items():
+            if col not in have:
+                self.db.execute(f"ALTER TABLE glossary ADD COLUMN {col} {decl}")
         self.lock = threading.RLock()
 
     def q(self, sql: str, args=()) -> list[sqlite3.Row]:

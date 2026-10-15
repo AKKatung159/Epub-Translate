@@ -66,6 +66,11 @@
     </nav>
 
     <div class="card tab" id="tab-glossary">
+      <details class="profile" id="g-profile-box" open>
+        <summary><b>ข้อมูลหนังสือ</b> <span class="muted small">แนวเรื่อง ฉาก ระดับภาษา ผู้เล่า (ร่างอัตโนมัติ แก้ได้ ใช้เป็นกฎกับทั้งเล่ม)</span></summary>
+        <textarea id="g-profile" rows="5" placeholder="ยังไม่มี (สร้างตอนทำ glossary)"></textarea>
+        <div class="row"><button id="g-profile-save">บันทึกข้อมูลหนังสือ</button><span id="g-profile-msg" class="msg small"></span></div>
+      </details>
       <div class="row wrap">
         <input id="g-search" placeholder="ค้นหาคำ…">
         <select id="g-type"><option value="">ทุกประเภท</option></select>
@@ -74,9 +79,12 @@
         <button id="g-save">บันทึก</button>
         <button id="g-start" class="primary hidden">บันทึกและเริ่มแปล</button>
       </div>
-      <p class="muted small">ชื่อคน/สถานที่ใช้คำไทยนี้ทุกจุดในเล่ม · ติ๊ก "คงอังกฤษ" สำหรับคำที่ไม่ควรแปล · ชี้ที่คำเพื่อดูประโยคตัวอย่าง</p>
+      <p class="muted small">ชื่อคน/สถานที่ใช้คำไทยนี้ทุกจุดในเล่ม · ติ๊ก "คงอังกฤษ" สำหรับคำที่ไม่ควรแปล · ชี้ที่คำเพื่อดูประโยคตัวอย่าง<br>
+        ตัวละคร: เพศ คำลงท้าย และคำแทนตัว ใช้กำหนดบทพูดทุกครั้งที่ตัวละครนั้นปรากฏ ·
+        เพิ่มคำธรรมดาตัวพิมพ์เล็กได้ เช่น <code>sister</code> → พี่สาว, <code>fan</code> → พัด (ใช้กับทั้งเล่ม)</p>
       <div class="table-wrap"><table id="g-table">
-        <thead><tr><th>อังกฤษ</th><th>ประเภท</th><th>ไทย</th><th>คงอังกฤษ</th><th>พบ</th><th></th></tr></thead>
+        <thead><tr><th>อังกฤษ</th><th>ประเภท</th><th>ไทย</th><th>คงอังกฤษ</th><th>พบ</th>
+          <th>เพศ</th><th>คำลงท้าย</th><th>แทนตัว</th><th>บทบาท</th><th>คนอื่นเรียก</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
       <div id="g-msg" class="msg"></div>

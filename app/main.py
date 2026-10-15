@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from . import llm, worker
 from .config import settings
 from .epub import TAG_RE, Book, check_tags
-from .store import job_dir, store
+from .store import GLOSSARY_COLS, job_dir, store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 STATIC = Path(__file__).parent / "static"
@@ -127,12 +127,16 @@ def delete_job(jid: str):
 class Options(BaseModel):
     bilingual: bool | None = None
     style_notes: str | None = None
+    book_profile: str | None = None
 
 
 @app.patch("/api/jobs/{jid}")
 def patch_job(jid: str, o: Options):
     _job_or_404(jid)
-    store.update_options(jid, **{k: v for k, v in o.model_dump().items() if v is not None})
+    changes = {k: v for k, v in o.model_dump().items() if v is not None}
+    if "book_profile" in changes:
+        changes["book_profile_edited"] = True        # "make the glossary again" keeps the user's profile
+    store.update_options(jid, **changes)
     return _summary(store.job(jid))
 
 
@@ -167,13 +171,21 @@ class Term(BaseModel):
     type: str = "term"
     th: str = ""
     keep_english: bool = False
+    gender: str = ""
+    role: str = ""
+    particle: str = ""
+    self_pronoun: str = ""
+    addressed_as: str = ""
+
+
+EDITABLE = ("type", "th", "keep_english", "gender", "role", "particle", "self_pronoun", "addressed_as")
 
 
 @app.get("/api/jobs/{jid}/glossary")
 def get_glossary(jid: str):
     _job_or_404(jid)
     return [dict(r) for r in store.q(
-        "SELECT en,type,th,keep_english,count,example,source FROM glossary WHERE job_id=? ORDER BY count DESC, en", (jid,))]
+        f"SELECT {','.join(GLOSSARY_COLS)} FROM glossary WHERE job_id=? ORDER BY count DESC, en", (jid,))]
 
 
 @app.put("/api/jobs/{jid}/glossary")
@@ -185,12 +197,16 @@ def put_glossary(jid: str, terms: list[Term]):
         en = t.en.strip()
         if not en:
             continue
+        new = t.model_dump()
+        new["th"] = t.th.strip() or en
+        new["keep_english"] = int(t.keep_english)
         o = old.get(en, {})
-        changed = not o or o["th"] != t.th.strip() or o["type"] != t.type or bool(o["keep_english"]) != t.keep_english
-        rows.append((jid, en, t.type, t.th.strip() or en, int(t.keep_english), o.get("count", 0), o.get("example", ""),
-                     "user" if changed else o.get("source", "")))
+        changed = not o or any(str(o.get(k, "")) != str(new[k]) for k in EDITABLE)
+        row = {**new, "en": en, "count": o.get("count", 0), "example": o.get("example", ""),
+               "source": "user" if changed else o.get("source", "")}
+        rows.append((jid, *[row[c] for c in GLOSSARY_COLS]))
     store.x("DELETE FROM glossary WHERE job_id=?", (jid,))
-    store.many("INSERT INTO glossary(job_id,en,type,th,keep_english,count,example,source) VALUES(?,?,?,?,?,?,?,?)", rows)
+    store.many(f"INSERT INTO glossary(job_id,{','.join(GLOSSARY_COLS)}) VALUES(?{',?' * len(GLOSSARY_COLS)})", rows)
     return {"ok": True, "terms": len(rows)}
 
 
@@ -252,7 +268,7 @@ def retranslate(jid: str, sid: int):
     find = matcher(worker.glossary_entries(jid))
     try:
         o = translate_one(SegIn(sid, r[0]["marked"], r[0]["plain"]), find,
-                          store.job(jid)["options"].get("style_notes", ""), lambda _: None)
+                          worker.style_notes(store.job(jid)), lambda _: None)
     except llm.ServerUnavailable as e:
         raise HTTPException(503, f"ต่อเครื่องโมเดลไม่ได้: {e}") from e
     store.x("UPDATE segments SET out=?, status=?, note=?, edited=0 WHERE job_id=? AND id=?",

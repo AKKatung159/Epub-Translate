@@ -7,9 +7,9 @@ import threading
 import time
 from collections import deque
 
-from . import glossary, llm
+from . import characters, glossary, llm
 from .config import settings
-from .store import store
+from .store import GLOSSARY_COLS, store
 from .translate import make_chunks, translate_chunk
 
 log = logging.getLogger("worker")
@@ -74,10 +74,51 @@ def run_glossary(jid: str) -> None:
             store.set_status(jid, "glossary", "ต่อเครื่องโมเดลได้แล้ว ทำ glossary ต่อ")
     if _status(jid) != "glossary":
         return
+
+    # character sheet: gender from pronouns, then speech style / role from the model for the main characters
+    people = sorted([e for e in entries if e["type"] == "person"], key=lambda e: -e["count"])
+    for e in entries:
+        for k in ("gender", "role", "particle", "self_pronoun", "addressed_as"):
+            e.setdefault(k, "")
+    for name, (g, _he, _she) in characters.genders([p["en"] for p in people], texts).items():
+        next(p for p in people if p["en"] == name)["gender"] = g
+    main_cast = [p for p in people if p["count"] >= 3][:30]
+    while True:
+        try:
+            store.set_message(jid, "กำลังสรุปแนวเรื่องและระดับภาษาของหนังสือ…")
+            profile = characters.book_profile(texts, main_cast, job["name"])
+
+            def sp_progress(done, total):
+                store.set_message(jid, f"กำลังทำข้อมูลตัวละคร {done}/{total} ตัว")
+            speech = characters.speech_profiles(main_cast, texts, job["name"], profile, sp_progress,
+                                                lambda: _status(jid) != "glossary")
+            break
+        except llm.ServerUnavailable:
+            _wait_for_server(jid)
+            if _status(jid) not in ACTIVE:
+                return
+            store.set_status(jid, "glossary", "ต่อเครื่องโมเดลได้แล้ว ทำข้อมูลตัวละครต่อ")
+    if _status(jid) != "glossary":
+        return
+    for p in people:
+        s = speech.get(p["en"], {})
+        p["role"] = (s.get("role") or "").strip()[:60]
+        p["particle"] = s.get("particle") if s.get("particle") in characters.PARTICLES else characters.default_particle(p["gender"])
+        if (p["gender"], p["particle"]) in (("male", "ค่ะ/คะ"), ("female", "ครับ")):
+            p["particle"] = characters.default_particle(p["gender"])   # pronoun count beats the model's guess
+        p["self_pronoun"] = (s.get("self_pronoun") or "").strip().split("/")[0][:20]
+        p["addressed_as"] = (s.get("addressed_as") or "").strip()[:40]
+        if p["addressed_as"] in ("-", "none"):
+            p["addressed_as"] = ""
+        if p["role"] in (p["th"], p["en"]):
+            p["role"] = ""                               # the model often just repeats the name
+    if profile and not job["options"].get("book_profile_edited"):
+        store.update_options(jid, book_profile=profile)     # an empty draft never replaces an earlier one
+
     store.x("DELETE FROM glossary WHERE job_id=? AND source != 'user'", (jid,))
-    store.many("INSERT OR IGNORE INTO glossary(job_id,en,type,th,keep_english,count,example,source) VALUES(?,?,?,?,?,?,?,?)",
-               [(jid, e["en"], e["type"], e["th"], int(e["keep_english"]), e["count"], e["example"], e["source"])
-                for e in entries])
+    cols = GLOSSARY_COLS
+    store.many(f"INSERT OR IGNORE INTO glossary(job_id,{','.join(cols)}) VALUES(?{',?' * len(cols)})",
+               [(jid, *[int(e[c]) if c == "keep_english" else e.get(c, "") for c in cols]) for e in entries])
     if job["options"].get("auto_glossary"):
         store.set_status(jid, "queued", "glossary อัตโนมัติ เริ่มแปล")
     else:
@@ -85,14 +126,19 @@ def run_glossary(jid: str) -> None:
 
 
 def glossary_entries(jid: str) -> list[dict]:
-    return [dict(r) for r in store.q("SELECT en,type,th,keep_english FROM glossary WHERE job_id=?", (jid,))]
+    return [dict(r) for r in store.q(f"SELECT {','.join(GLOSSARY_COLS)} FROM glossary WHERE job_id=?", (jid,))]
+
+
+def style_notes(job: dict) -> str:
+    """Book profile (drafted, editable) + the user's own notes: rules for the whole book."""
+    return "\n".join(x for x in (job["options"].get("book_profile", ""), job["options"].get("style_notes", "")) if x.strip())
 
 
 def run_translation(jid: str) -> None:
     job = store.job(jid)
     store.set_status(jid, "translating", "")
     find = glossary.matcher(glossary_entries(jid))
-    notes = job["options"].get("style_notes", "")
+    notes = style_notes(job)
     rows = store.q("SELECT id, doc, marked, plain FROM segments WHERE job_id=? AND status='pending' ORDER BY id", (jid,))
     chunks = make_chunks([(r["id"], r["doc"], r["marked"], r["plain"]) for r in rows], settings.chunk_chars)
     titles = {r["doc"]: r["title"] for r in store.q("SELECT doc, title FROM docs WHERE job_id=?", (jid,))}

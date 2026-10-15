@@ -246,18 +246,23 @@ def harmonize(entries: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------------------------- use in chunks
 
 def matcher(entries: list[dict]):
-    """Return f(text) -> entries that occur in text (longest first, whole words, with possessive)."""
+    """Return f(text) -> entries that occur in text (longest first, whole words, with possessive).
+
+    Names match case-sensitively ("Bill" the lizard, not "the bill"); entries the user writes in lower case
+    ("sister", "fan", "ma'am") are ordinary words and match in any case.
+    """
     entries = sorted([e for e in entries if e.get("en")], key=lambda e: -len(e["en"]))
     if not entries:
         return lambda text: []
-    pattern = re.compile(r"(?<![A-Za-z])(" + "|".join(re.escape(e["en"]) for e in entries) + r")(?![A-Za-z])")
-    by_en = {e["en"]: e for e in entries}
+    alts = [(re.escape(e["en"]) if e["en"] != e["en"].lower() else "(?i:" + re.escape(e["en"]) + ")") for e in entries]
+    pattern = re.compile(r"(?<![A-Za-z])(" + "|".join(alts) + r")(?![A-Za-z])")
+    by_key = {(e["en"] if e["en"] != e["en"].lower() else e["en"].lower()): e for e in entries}
 
     def find(text: str) -> list[dict]:
         seen, out = set(), []
         for m in pattern.finditer(text):
-            e = by_en[m.group(1)]
-            if e["en"] not in seen:
+            e = by_key.get(m.group(1)) or by_key.get(m.group(1).lower())
+            if e and e["en"] not in seen:
                 seen.add(e["en"])
                 out.append(e)
         return out
