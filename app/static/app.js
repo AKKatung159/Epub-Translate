@@ -165,7 +165,7 @@ async function refreshJob() {
     stat("ย่อหน้า", `${j.done + j.flagged} / ${j.segments}`),
     stat("ต้องตรวจ", j.flagged, j.flagged ? "warn" : ""),
     stat("Glossary", `${j.glossary_terms} คำ`),
-    j.chars_per_sec ? stat("ความเร็ว", `${j.chars_per_sec} ตัวอักษร/วิ`) : "",
+    j.chars_per_sec ? stat("ความเร็ว (5 นาทีล่าสุด)", `${j.chars_per_sec} ตัวอักษร/วิ${j.gen_tps ? ` · ${j.gen_tps} tok/s` : ""}`) : "",
     elapsed ? stat("ใช้เวลาไป", fmtDur(elapsed)) : "",
     j.current_doc && j.status === "translating" ? stat("กำลังแปล", esc(j.current_doc)) : "",
   ].filter(Boolean).join("");

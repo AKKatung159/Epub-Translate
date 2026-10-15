@@ -145,16 +145,28 @@ def run_translation(jid: str) -> None:
     titles = {r["doc"]: r["title"] for r in store.q("SELECT doc, title FROM docs WHERE job_id=?", (jid,))}
     doc_of = {r["id"]: r["doc"] for r in rows}
 
-    finished: deque = deque(maxlen=40)        # (time, chars) of the last finished chunks, for speed/ETA
-    tps: deque = deque(maxlen=24)
+    # Speed = what actually finished in the last few minutes, over that wall time. With 4 chunks in flight
+    # they often finish together, so per-chunk timings (or "time since the previous chunk") jump around.
+    window = 300.0
+    finished: deque = deque()                 # (time, English chars) per finished chunk
+    tokens: deque = deque()                   # (time, generated tokens) per model reply, all threads
     st = job["stats"]
     st.setdefault("started", time.time())
     store.update_stats(jid, started=st["started"])
     t_start = time.time()
 
     def on_reply(reply):
-        if reply.gen_tps:
-            tps.append(reply.gen_tps)
+        tokens.append((time.time(), reply.completion_tokens))
+
+    def rates() -> tuple[float, float]:
+        now = time.time()
+        span = min(window, now - t_start)
+        for q in (finished, tokens):
+            while q and q[0][0] < now - window:
+                q.popleft()
+        if span < 30:
+            return 0.0, 0.0                   # too early to say anything useful
+        return sum(c for _, c in finished) / span, sum(t for _, t in list(tokens)) / span
 
     # Several chunks at once: llama-server batches them on the GPU (measured: 4 at once = 2.6x the
     # throughput of 1, same model and prompts, so the same quality). Chunks are independent, so order
@@ -185,10 +197,8 @@ def run_translation(jid: str) -> None:
                 store.many("UPDATE segments SET out=?, status=?, note=? WHERE job_id=? AND id=? AND edited=0",
                            [(o.marked, o.status, o.note, jid, o.id) for o in outs])
                 finished.append((time.time(), sum(len(x.plain) for x in chunk)))
-                span = finished[-1][0] - (finished[0][0] if len(finished) > 1 else t_start)
-                chars = sum(c for _, c in finished) if len(finished) > 1 else finished[0][1]
-                store.update_stats(jid, chars_per_sec=round(chars / span, 1) if span > 0 else 0,
-                                   gen_tps=round(sum(tps) / len(tps) * min(n, len(running) + 1), 1) if tps else 0,
+                cps, tps = rates()
+                store.update_stats(jid, chars_per_sec=round(cps, 1), gen_tps=round(tps, 1),
                                    current_doc=titles.get(doc_of[chunk[0].id], ""))
             if server_down and not running:
                 _wait_for_server(jid)
