@@ -82,12 +82,13 @@ def test_pdf_to_xtc_end_to_end(tmp_path):
     n = convert(pdf, out, Options(mode="auto", depth=2), progress=lambda i, total, dev: seen.append((i, total)))
     info = read_info(out)
     assert n == len(info["pages"]) and seen[-1] == (3, 3)
-    # each page body is ~1,870 px tall once 800 px wide: 3 pages flow into ~12 full strips of <= 480 px
-    assert 12 <= n <= 14
-    first = decode_page(info["raw"][info["pages"][0][0]:][:info["pages"][0][1]], 2)
+    # each page body is ~1,870 px tall once 800 px wide: 3 pages flow into ~12 full strips of <= 480 px, + a cover
+    assert 13 <= n <= 15
+    first = decode_page(info["raw"][info["pages"][1][0]:][:info["pages"][1][1]], 2)
     assert first.shape == (800, 480) and (first < 128).any()
     whole = tmp_path / "page.xtc"
-    assert convert(pdf, whole, Options(mode="page", depth=1)) == 3
+    assert convert(pdf, whole, Options(mode="page", depth=1)) == 4
+    assert convert(pdf, tmp_path / "bare.xtc", Options(mode="page", cover=False)) == 3
     assert read_info(whole)["magic"] == b"XTC\0"
 
 
@@ -100,19 +101,19 @@ def test_default_is_black_white_and_chapters_stay_few(tmp_path):
     ImageDraw.Draw(page).rectangle((20, 20, 180, 40), fill="black")
     pdf = tmp_path / "long.pdf"
     page.save(pdf, save_all=True, append_images=[page] * 699, resolution=72)
-    assert convert(pdf, tmp_path / "long.xtc", Options(mode="page")) == 700
+    assert convert(pdf, tmp_path / "long.xtc", Options(mode="page")) == 702      # 700 + a cover per file
     # longer than one part (600): two files, each with its own page table and the chapters inside it
     a, b = read_info(tmp_path / "long 01.xtc"), read_info(tmp_path / "long 02.xtc")
     assert not (tmp_path / "long.xtc").exists()
-    assert a["magic"] == b"XTC\0" and len(a["pages"]) == 600 and len(b["pages"]) == 100
+    assert a["magic"] == b"XTC\0" and len(a["pages"]) == 601 and len(b["pages"]) == 101
     # part number first (file lists cut long names), then what is inside: PDF pages when there are no chapters
     assert a["title"] == "01/2 หน้า 1-600 · long" and b["title"].startswith("02/2 หน้า 601-700")
     import json
     index = json.loads((tmp_path / "long.parts.json").read_text(encoding="utf-8"))
-    assert [(x["file"], x["label"], x["pages"]) for x in index] == [("long 01.xtc", "หน้า 1-600", 600),
-                                                                   ("long 02.xtc", "หน้า 601-700", 100)]
-    assert 1 < len(a["chapters"]) <= MAX_CHAPTERS and b["chapters"] and b["chapters"][0].first == 0
-    assert all(c.last < 100 for c in b["chapters"])
+    assert [(x["file"], x["label"], x["pages"]) for x in index] == [("long 01.xtc", "หน้า 1-600", 601),
+                                                                   ("long 02.xtc", "หน้า 601-700", 101)]
+    assert 1 < len(a["chapters"]) <= MAX_CHAPTERS and b["chapters"] and b["chapters"][0].first == 1
+    assert all(1 <= c.first and c.last <= 100 for c in b["chapters"])
 
 
 def test_pictures_are_dithered_text_stays_sharp_and_a_cover_page_stays_whole(tmp_path):
@@ -160,3 +161,84 @@ def test_chapters_found_in_page_text_name_the_parts(tmp_path):
     import json
     labels = [x["label"] for x in json.loads((tmp_path / "novel.parts.json").read_text(encoding="utf-8"))]
     assert labels[0].startswith("Chapter 1-") and all(lbl.startswith("Chapter") for lbl in labels)
+
+
+def page_of(info: dict, k: int, depth: int) -> np.ndarray:
+    off, size, _, _ = info["pages"][k]
+    return decode_page(info["raw"][off:off + size], depth)
+
+
+def test_every_file_starts_with_a_cover_and_chapters_move_one_page_down(tmp_path):
+    """The X4 home screen shows a file's first page as its cover: page 1 of every part is the cover, every
+    chapter starts one page later than without it."""
+    from app.xtccover import cover_page
+    yy, xx = np.mgrid[0:300, 0:200]
+    art = Image.fromarray(((np.sin(xx / 15) + np.cos(yy / 20)) * 70 + 128).clip(0, 255).astype(np.uint8))
+    chapters = [Chapter("บทที่ 1", 0, 3), Chapter("บทที่ 2", 4, 6), Chapter("บทที่ 3", 7, 9)]
+
+    def pages(wr):
+        for v in range(10):
+            g = np.full((H, W), 255, np.uint8)
+            g[100 + v * 40:120 + v * 40, 50:400] = 0                 # a "line" that says which page it is
+            wr.add(g)
+
+    for depth in (1, 2):
+        wr = Writer(depth, lambda label: cover_page(art, "ทดสอบ", "", depth, label))
+        pages(wr)
+        out = tmp_path / f"one.xtc{'h' * (depth - 1)}"
+        wr.save(out, "ทดสอบ", "", chapters)
+        info = read_info(out)
+        assert len(info["pages"]) == 11
+        assert [(c.first, c.last) for c in info["chapters"]] == [(1, 4), (5, 7), (8, 10)]
+        cover = page_of(info, 0, depth)
+        # the picture fills the middle, dithered: black and white mixed (and greys for XTCH), white margins
+        mid = cover[300:500, 100:380]
+        assert 0.2 < (mid < 128).mean() < 0.8 and (cover[:10] == 255).all() and (cover[:, :10] == 255).all()
+        if depth == 2:
+            assert {85, 170} <= set(np.unique(mid).tolist())
+        assert (page_of(info, 1, depth)[100:120, 50:400] == 0).all()   # page 2 = the first page of the book
+
+    wr = Writer(1, lambda label: cover_page(None, "ปลุกพลังสาวแม่มด", "Er Mu", 1, label))
+    pages(wr)
+    files = wr.save_parts(tmp_path, "series", "ปลุกพลังสาวแม่มด", "Er Mu", chapters, per_part=4)
+    infos = [read_info(f) for f in files]
+    assert [len(i["pages"]) for i in infos] == [5, 5, 3]
+    for i in infos:                                                # a title page (no picture): ink, but no text line
+        c = page_of(i, 0, 1)
+        assert (c < 128).any() and not (c[100:120, 50:400] == 0).all()
+    assert not np.array_equal(page_of(infos[0], 0, 1), page_of(infos[1], 0, 1))   # part number on the cover
+    # chapters inside part 2 (pages 4..7): บทที่ 2 = 4..6 -> 1..3, บทที่ 3 = 7 -> 4
+    assert [(c.name, c.first, c.last) for c in infos[1]["chapters"]] == [("บทที่ 2", 1, 3), ("บทที่ 3", 4, 4)]
+
+
+def test_pdf_cover_picture_is_not_also_a_page_of_the_book(tmp_path):
+    """PDF page 1 a picture: it becomes the cover of every part (upright, whole), not a second page; a PDF
+    starting with text gets a title page; bookmarks still point at the right pages."""
+    yy, xx = np.mgrid[0:900, 0:600]
+    photo = Image.fromarray(((np.sin(xx / 30) + np.cos(yy / 45)) * 70 + 128).clip(0, 255).astype(np.uint8))
+    body = Image.fromarray(lines_image(45)).convert("RGB")
+    pdf = tmp_path / "book.pdf"
+    photo.convert("RGB").save(pdf, save_all=True, append_images=[body] * 4, resolution=150)
+    n = convert(pdf, tmp_path / "book.xtc", Options(per_part=6))
+    files = sorted(tmp_path.glob("book [0-9][0-9].xtc"))
+    infos = [read_info(f) for f in files]
+    assert len(files) >= 2 and n == sum(len(i["pages"]) for i in infos)
+    for i in infos:
+        c = page_of(i, 0, 1)
+        assert 0.2 < (c[300:500, 100:380] == 0).mean() < 0.8           # the dithered picture
+        assert (c[:, :8] == 255).all()                                 # whole, with white margins
+    assert all((page_of(i, 1, 1) < 128).any() for i in infos)          # then text
+    text_only = tmp_path / "text.pdf"
+    body.save(text_only, save_all=True, append_images=[body], resolution=150)
+    convert(text_only, tmp_path / "text.xtch", Options(depth=2))
+    info = read_info(tmp_path / "text.xtch")
+    assert info["chapters"][0].first == 1                              # "หน้า 1" = the first page after the cover
+
+
+def test_thai_lines_never_break_inside_a_cluster():
+    from app.xtccover import font, wrap
+    f = font(40)
+    for line in wrap("ปลุกพลังสาวแม่มดผู้ไม่ยอมแพ้ต่อโชคชะตาที่ไม่เป็นธรรม เล่ม 12", f, 200, 9):
+        assert f.getlength(line) <= 200 + 40
+        assert not ("ั" <= line[0] <= "ฺ" or "็" <= line[0] <= "๎")
+        assert not "เ" <= line[-1] <= "ไ"

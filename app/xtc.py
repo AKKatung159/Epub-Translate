@@ -20,6 +20,7 @@ import struct
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -164,10 +165,15 @@ def _fixed(text: str, size: int) -> bytes:
 
 
 class Writer:
-    """Collect pages one by one (kept on disk), then write the finished file."""
+    """Collect pages one by one (kept on disk), then write the finished file.
 
-    def __init__(self, depth: int = 2):
+    cover(label) -> page, when set, makes the first page of every written file (the X4 shows a file's first page
+    as its cover); label is "" for a single file, "02/16 · บทที่ 94-187" for a part. Chapters and page counts given
+    to save / save_parts count the added pages only: each moves one page down in the file."""
+
+    def __init__(self, depth: int = 2, cover: Callable[[str], np.ndarray] | None = None):
         self.depth = depth
+        self.cover = cover
         self.tmp = tempfile.TemporaryFile()
         self.sizes: list[int] = []
 
@@ -214,19 +220,26 @@ class Writer:
                         for i, c in enumerate(kept)]
             name = f"{stem}{ext}" if parts == 1 else f"{stem} {k + 1:02d}{ext}"
             shown = title if parts == 1 else f"{k + 1:02d}/{parts} {label + ' · ' if label else ''}{title}"
-            self._write(folder / name, s, e, shown, author, mine)
+            on_cover = "" if parts == 1 else f"{k + 1:02d}/{parts}{' · ' + label if label else ''}"
+            pages = self._write(folder / name, s, e, shown, author, mine, on_cover)
             out.append(folder / name)
-            index.append({"file": name, "label": label, "pages": e - s})
+            index.append({"file": name, "label": label, "pages": pages})
         (folder / f"{stem}.parts.json").write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
         self.tmp.close()
         return out
 
-    def _write(self, path: Path, start: int, end: int, title: str, author: str, chapters) -> None:
+    def _write(self, path: Path, start: int, end: int, title: str, author: str, chapters, label: str = "") -> int:
+        """Pages start..end-1 (after a cover page, if any) as one file; returns its page count."""
         sizes = self.sizes[start:end]
         n = len(sizes)
         if not n:
             raise ValueError("no pages")
         chapters = [c for c in chapters if 0 <= c.first <= c.last < n][:500]
+        cover = encode_page(self.cover(label), self.depth) if self.cover else b""
+        if cover:
+            chapters = [Chapter(c.name, c.first + 1, c.last + 1) for c in chapters]
+            sizes = [len(cover), *sizes]
+            n += 1
         chap_off = META + 128 + 64 if chapters else 0
         table_off = META + 128 + 64 + CHAPTER * len(chapters)
         data_off = table_off + 16 * n
@@ -241,12 +254,14 @@ class Writer:
             for size in sizes:
                 f.write(struct.pack("<QIHH", off, size, W, H))
                 off += size
+            f.write(cover)
             self.tmp.seek(sum(self.sizes[:start]))
-            left = sum(sizes)
+            left = sum(self.sizes[start:end])
             while left:
                 chunk = self.tmp.read(min(left, 1 << 20))
                 f.write(chunk)
                 left -= len(chunk)
+        return n
 
 
 def read_info(path: Path) -> dict:

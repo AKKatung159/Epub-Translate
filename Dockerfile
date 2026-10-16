@@ -3,6 +3,10 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/data
 WORKDIR /srv
 
+# Thai font for generated cover pages; libfribidi lets Pillow's bundled Raqm place Thai marks correctly
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-tlwg-laksaman-ttf libfribidi0 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

@@ -76,8 +76,12 @@ Speed: ~25 PDF pages per second (measured on the ROG Ally; the apps VM may be sl
   → `The Goblin Emperor - ...`); rename books and PDFs in the UI. Files are named "Name (ไทย).epub" /
   "Name.xtc" / "Name 01.xtc".
 - **Pictures in black/white files** are dithered (8×8 ordered dither) so they read as grey; text stays a sharp
-  threshold. Regions of dense, mostly mid-grey 16-px tiles are pictures; text tiles are mostly white paper. A
-  picture on PDF page 1 becomes a whole upright cover page (the X4 also uses page 1 for its home-screen thumbnail).
+  threshold. Regions of dense, mostly mid-grey 16-px tiles are pictures; text tiles are mostly white paper.
+- **Cover page first**: the X4 shows a file's first page as its cover (home screen, file list), so every XTC/XTCH
+  file, each part of a long book too, starts with one (`app/xtccover.py`): the picture on PDF page 1, fitted whole
+  with white margins and Floyd-Steinberg dithered (black/white, or 4 greys for XTCH), else a title page in a Thai
+  font. Parts carry "02/16 · บทที่ 94-187" under it. Chapters start one page later because of it; files made
+  before this have no cover page (convert again to get one; re-sending moves saved reading positions one page).
 - Firmware checked: CrossPoint 1.0.0 (Thai fork) and CrossPoint Halo 2 v2.2.15 (kocha01/crosspoint-halo2-custom)
   read XTC the same way: one whole-page malloc per turn and the whole page table in RAM.
 

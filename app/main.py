@@ -499,7 +499,7 @@ def preview_pdf(pid: str, n: int):
         f.seek(off)
         data = f.read(size)
     img = Image.fromarray(decode_page(data, 2 if path.suffix == ".xtch" else 1))
-    if d["options"].get("mode") != "page":
+    if d["options"].get("mode") != "page" and n > 0:          # page 0 of each file: the cover, upright
         img = img.transpose(Image.ROTATE_90 if d["options"].get("rotate", "cw") == "cw" else Image.ROTATE_270)
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
