@@ -334,7 +334,8 @@ def _pdf_summary(d: dict) -> dict:
     out = {k: d[k] for k in ("id", "name", "created", "status", "message", "options", "pdf_pages", "done_pages",
                              "out_pages", "out_size")}
     files = pdfworker.parts(d) if d["status"] == "done" else []
-    out["parts"] = [{"pages": _xtc_count(f), "size": f.stat().st_size} for f in files]
+    names = pdfworker.device_files(d, _safe_name(d["name"]))[1] if files else []
+    out["parts"] = [{"pages": _xtc_count(f), "size": f.stat().st_size, "name": n} for n, f in names]
     return out
 
 
@@ -448,18 +449,19 @@ def download_pdf(pid: str, part: int | None = None):
     if d["status"] != "done" or not files:
         raise HTTPException(409, "ยังแปลงไม่เสร็จ")
     base = _safe_name(d["name"])
+    folder, named = pdfworker.device_files(d, base)
     if len(files) == 1 or part is not None:
         k = (part or 1) - 1
-        if not 0 <= k < len(files):
+        if not 0 <= k < len(named):
             raise HTTPException(404, "ไม่มีไฟล์นี้")
-        tag = f" {k + 1:02d}" if len(files) > 1 else ""
-        return _attachment(files[k], f"{base}{tag}{files[k].suffix}")
+        name, path = named[k]
+        return _attachment(path, f"{base} {name}" if folder else name)
     zpath = pdfworker.pdf_dir(pid) / "all.zip"
     if not zpath.exists():
         tmp = zpath.with_suffix(".tmp")
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as z:   # 1-bit pages shrink ~4x
-            for k, f in enumerate(files):
-                z.write(f, f"{base} {k + 1:02d}{f.suffix}")
+            for name, f in named:                       # unzips into one folder per book
+                z.write(f, f"{folder}/{name}")
         tmp.replace(zpath)
     return _attachment(zpath, f"{base}.zip", "application/zip")
 
@@ -508,13 +510,33 @@ class X4Address(BaseModel):
 @app.get("/api/x4")
 def x4_status():
     from . import x4
-    return {**x4.status(), "sends": x4.sends}
+    return {**x4.status(), "sends": x4.queue_view()}
 
 
 @app.get("/api/x4/sends")
 def x4_sends():
     from . import x4
-    return x4.sends
+    return x4.queue_view()
+
+
+@app.post("/api/x4/send-all")
+def x4_send_all():
+    """Queue every finished PDF conversion and every finished Thai book (already-there files are skipped)."""
+    queued = []
+    for d in pdfworker.rows():
+        if d["status"] == "done" and pdfworker.parts(d):
+            queued.append(x4_send("pdf", d["id"])["title"])
+    for j in store.jobs():
+        if j["status"] == "done":
+            queued.append(x4_send("book", j["id"])["title"])
+    return {"queued": queued}
+
+
+@app.post("/api/x4/cancel/{kind}/{oid}")
+def x4_cancel(kind: str, oid: str):
+    from . import x4
+    x4.cancel(f"{kind}:{oid}")
+    return x4.queue_view()
 
 
 @app.put("/api/x4")
@@ -533,15 +555,14 @@ def x4_send(kind: str, oid: str):
         files = pdfworker.parts(d)
         if d["status"] != "done" or not files:
             raise HTTPException(409, "ยังแปลงไม่เสร็จ")
-        base = _safe_name(d["name"])
-        named = [(f"{base}{f.suffix}" if len(files) == 1 else f"{base} {k + 1:02d}{f.suffix}", f)
-                 for k, f in enumerate(files)]
+        folder, named = pdfworker.device_files(d, _safe_name(d["name"]))
+        title = d["name"]
     elif kind == "book":
         data, fname = thai_epub(_job_or_404(oid))
-        named = [(fname, data)]
+        named, folder, title = [(fname, data)], "", fname[:-5]
     else:
         raise HTTPException(404)
-    return x4.start(f"{kind}:{oid}", named)
+    return x4.enqueue(f"{kind}:{oid}", title, named, folder)
 
 
 # OPDS (e-readers on the LAN) ---------------------------------------------------------------------------------

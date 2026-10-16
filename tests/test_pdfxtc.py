@@ -105,7 +105,12 @@ def test_default_is_black_white_and_chapters_stay_few(tmp_path):
     a, b = read_info(tmp_path / "long 01.xtc"), read_info(tmp_path / "long 02.xtc")
     assert not (tmp_path / "long.xtc").exists()
     assert a["magic"] == b"XTC\0" and len(a["pages"]) == 600 and len(b["pages"]) == 100
-    assert a["title"].endswith("(1/2)") and b["title"].endswith("(2/2)")
+    # part number first (file lists cut long names), then what is inside: PDF pages when there are no chapters
+    assert a["title"] == "01/2 หน้า 1-600 · long" and b["title"].startswith("02/2 หน้า 601-700")
+    import json
+    index = json.loads((tmp_path / "long.parts.json").read_text(encoding="utf-8"))
+    assert [(x["file"], x["label"], x["pages"]) for x in index] == [("long 01.xtc", "หน้า 1-600", 600),
+                                                                   ("long 02.xtc", "หน้า 601-700", 100)]
     assert 1 < len(a["chapters"]) <= MAX_CHAPTERS and b["chapters"] and b["chapters"][0].first == 0
     assert all(c.last < 100 for c in b["chapters"])
 
@@ -130,3 +135,28 @@ def test_pictures_are_dithered_text_stays_sharp_and_a_cover_page_stays_whole(tmp
     info = read_info(out)
     first = decode_page(info["raw"][info["pages"][0][0]:][:info["pages"][0][1]], 1)
     assert picture_tiles(np.where(first > 0, 170, 60).astype(np.uint8)).mean() > 0.2   # page 1 = the cover, upright
+
+
+def test_chapters_found_in_page_text_name_the_parts(tmp_path):
+    """No bookmarks: "บทที่ N" at the top of a page becomes a chapter, and parts are labelled by them."""
+    import pytest
+    pytest.importorskip("reportlab")
+    from reportlab.pdfgen import canvas
+    from app.pdfslice import text_marks
+    import pypdfium2 as pdfium
+    pdf = tmp_path / "novel.pdf"
+    c = canvas.Canvas(str(pdf), pagesize=(300, 400))
+    for n in range(1, 13):
+        c.drawString(30, 360, f"Chapter {n} The Road")
+        for y in range(330, 60, -18):
+            c.drawString(30, y, "Some text of the story goes here, line after line.")
+        c.showPage()
+    c.save()
+    doc = pdfium.PdfDocument(str(pdf))
+    marks = text_marks(doc)
+    doc.close()
+    assert [p for _, p in marks] == list(range(12)) and marks[3][0].startswith("Chapter 4")
+    convert(pdf, tmp_path / "novel.xtc", Options(per_part=10))
+    import json
+    labels = [x["label"] for x in json.loads((tmp_path / "novel.parts.json").read_text(encoding="utf-8"))]
+    assert labels[0].startswith("Chapter 1-") and all(lbl.startswith("Chapter") for lbl in labels)

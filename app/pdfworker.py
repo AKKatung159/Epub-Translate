@@ -57,6 +57,22 @@ def parts(d: dict) -> list[Path]:
     return sorted(o.parent.glob(f"book [0-9][0-9]{o.suffix}"))
 
 
+def device_files(d: dict, base: str) -> tuple[str, list[tuple[str, Path]]]:
+    """(folder under /Books or "", [(file name, path)]) as the files should appear on the X4.
+
+    One file: "/Books/<name>.xtc". Several: their own folder "/Books/<name>/" with "01 บทที่ 1-93.xtc",
+    "02 บทที่ 94-187.xtc"...: the number first, because the X4's file list cuts long names."""
+    files = parts(d)
+    if len(files) == 1:
+        return "", [(f"{base}{files[0].suffix}", files[0])]
+    labels = {}
+    index = pdf_dir(d["id"]) / "book.parts.json"
+    if index.exists():
+        labels = {x["file"]: x["label"] for x in json.loads(index.read_text(encoding="utf-8"))}
+    return base, [(f"{k + 1:02d} {labels.get(f.name) or 'ส่วนที่ ' + str(k + 1)}{f.suffix}".strip(), f)
+                  for k, f in enumerate(files)]
+
+
 PART_PAGES = settings.pdf_part_pages
 
 
@@ -86,7 +102,7 @@ def _run(pid: str) -> None:
     o = d["options"]
     opts = Options(mode=o.get("mode", "auto"), rotate=o.get("rotate", "cw"), depth=int(o.get("depth", 1)),
                    trim=bool(o.get("trim", True)), per_part=PART_PAGES)
-    for old in [*pdf_dir(pid).glob("book*.xtc*"), pdf_dir(pid) / "all.zip"]:
+    for old in [*pdf_dir(pid).glob("book*.xtc*"), pdf_dir(pid) / "all.zip", pdf_dir(pid) / "book.parts.json"]:
         old.unlink(missing_ok=True)
     set_status(pid, "converting", "กำลังแปลงหน้า…", done_pages=0, out_pages=0)
     t0 = time.time()

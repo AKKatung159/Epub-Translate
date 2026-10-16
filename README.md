@@ -47,7 +47,8 @@ No model involved; it runs on its own queue, so it never waits behind a translat
   line when a gap exists). Strips flow across PDF pages so none is half empty; a chapter starts on a fresh strip.
   Read with the device turned sideways: text ~1.67× larger than a whole page upright.
 - **At most 3 / 4 strips per page**: smaller text on big pages, fewer page turns. **Whole page**: pictures, forms.
-- PDF bookmarks become the chapter menu (top two levels, at most 64); without bookmarks, evenly spaced entries.
+- PDF bookmarks become the chapter menu; without bookmarks, lines like "บทที่ 12" / "ตอนที่ 3" / "Chapter 7" at
+  the top of a page's text are used; failing that, evenly spaced page entries. At most 100 entries per file.
 - **Black/white (.xtc) by default.** The firmware mallocs one whole page each turn: 48 KB for XTC, 96 KB for
   4-grey XTCH. A 70 MB XTCH book gave "Memory error" on the X4 (no 96 KB block left in a fragmented heap); XTC
   halves both the request and the file. Strokes are thresholded at 170/255 so small text stays whole.
@@ -66,8 +67,10 @@ Speed: ~25 PDF pages per second (measured on the ROG Ally; the apps VM may be sl
 - **OPDS** at `/opds`: every translated book (finished or partly done) as an EPUB. On the X4 (CrossPoint):
   Settings → OPDS → add `http://epub.lan/opds` (or `http://<apps VM IP>:8770/opds`), then browse and download
   from the device. CrossPoint follows only `application/epub+zip` acquisition links, so `.xtc` files are not listed.
-- **Send to X4** (button on a PDF conversion or a book): with the X4 on its File Transfer screen, the server
-  uploads the file(s) to `/Books` through the device's own web server. The container cannot resolve
+- **Send to X4** (button on a PDF conversion or a book, or "send everything"): a queue, one upload at a time,
+  with the X4 on its File Transfer screen. Files already there with the same name and size are skipped. A book
+  in several parts gets its own folder `/Books/<name>/` with files named by what is inside, number first
+  (`01 บทที่ 1-93.xtc`), because the device's file list cuts long names. The container cannot resolve
   `crosspoint.local`, so set the X4's IP in the PDF menu (or `X4_ADDRESS`) and reserve it in the router.
 - **Readable names**: download-site tags and underscores are removed (`_OceanofPDF.com_The_Goblin_Emperor_-_...`
   → `The Goblin Emperor - ...`); rename books and PDFs in the UI. Files are named "Name (ไทย).epub" /

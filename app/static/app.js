@@ -513,8 +513,8 @@ async function loadPdfs() {
     // made before the X4 fixes: one file too long for its memory, or 4 greys (96 KB per page)
     const risky = d.status === "done" && (d.parts?.some((p) => p.pages > 600) || o.depth == 2);
     const warn = risky ? `<div class="note">⚠ ${o.depth == 2 ? "เทา 4 ระดับใช้หน่วยความจำเครื่องมาก" : "ไฟล์ยาวเกินที่ X4 เปิดได้"} อาจขึ้น Memory error บน X4 · กด "ดูตัวอย่าง / ปรับ" แล้วแปลงใหม่เป็นขาวดำ</div>` : "";
-    const partList = nparts > 1 ? `<details class="pdf-parts"><summary class="small">ดาวน์โหลดทีละไฟล์ (${nparts} ไฟล์ ไม่เกิน 600 หน้าจอต่อไฟล์)</summary>
-        <div class="pdf-part-links">${d.parts.map((p, k) => `<a href="/api/pdf/${d.id}/download?part=${k + 1}">${String(k + 1).padStart(2, "0")} · ${p.pages} หน้าจอ · ${(p.size / 1048576).toFixed(1)} MB</a>`).join("")}</div></details>` : "";
+    const partList = nparts > 1 ? `<details class="pdf-parts"><summary class="small">${nparts} ไฟล์ (ส่งเข้าโฟลเดอร์ Books/${esc(d.name)}) · ดาวน์โหลดทีละไฟล์</summary>
+        <div class="pdf-part-links">${d.parts.map((p, k) => `<a href="/api/pdf/${d.id}/download?part=${k + 1}">${esc(p.name || String(k + 1).padStart(2, "0"))} · ${p.pages} หน้าจอ · ${(p.size / 1048576).toFixed(1)} MB</a>`).join("")}</div></details>` : "";
     const panel = open && d.status === "done" ? `
       <div class="pdf-panel">
         <img src="/api/pdf/${d.id}/preview/${pdfOpen.n}" alt="ตัวอย่างหน้าจอ ${pdfOpen.n + 1}">
@@ -589,6 +589,7 @@ let x4Sends = {};
 async function refreshSends() { try { x4Sends = await api("/api/x4/sends"); } catch { x4Sends = {}; } }
 function x4Label(key) {
   const s = x4Sends[key];
+  if (s?.state === "queued") return `ในคิว ลำดับ ${s.place || "?"}`;
   if (s?.state === "sending") return `ส่งอยู่ ${s.total ? Math.round(100 * s.sent / s.total) : 0}%`;
   if (s?.state === "done") return "ส่งแล้ว ✓ ส่งอีกครั้ง";
   if (s?.state === "error") return "ส่งไม่สำเร็จ ลองใหม่";
@@ -598,23 +599,53 @@ async function sendX4(kind, id) {
   try {
     const st = await api("/api/x4");
     if (!st.ok) { toast(st.error || "ต่อ X4 ไม่ได้", "err"); return; }
-    await api(`/api/x4/send/${kind}/${id}`, { method: "POST" });
-    toast("กำลังส่งเข้า X4… อย่าเพิ่งปิดหน้า File Transfer");
-    watchSend(`${kind}:${id}`);
+    const s = await api(`/api/x4/send/${kind}/${id}`, { method: "POST" });
+    toast(s.state === "queued" ? "เข้าคิวส่งแล้ว อย่าเพิ่งปิดหน้า File Transfer บน X4" : "กำลังส่งเข้า X4…");
+    watchQueue();
   } catch (e) { toast(e.message, "err"); }
 }
-function watchSend(key) {
-  const t = setInterval(async () => {
+let queueTimer = null, queueSeen = {};
+function watchQueue() {
+  if (queueTimer) return;
+  queueTimer = setInterval(async () => {
     await refreshSends();
-    const s = x4Sends[key];
+    renderQueue();
     if (view === "pdf") { pdfSig = ""; loadPdfs(); } else if (current) refreshJob();
-    if (!s || s.state !== "sending") {
-      clearInterval(t);
-      if (s?.state === "done") toast(s.message);
-      if (s?.state === "error") toast(s.message, "err");
+    for (const [k, s] of Object.entries(x4Sends)) {       // tell once when an item finishes
+      if (queueSeen[k] && queueSeen[k] !== s.state && ["done", "error"].includes(s.state)) toast(`${s.title}: ${s.message}`, s.state === "error" ? "err" : "");
+      queueSeen[k] = s.state;
     }
+    if (!Object.values(x4Sends).some((s) => ["queued", "sending"].includes(s.state))) { clearInterval(queueTimer); queueTimer = null; }
   }, 1500);
 }
+function renderQueue() {
+  const box = $("#x4-queue");
+  if (!box) return;
+  const items = Object.entries(x4Sends).sort((a, b) => (a[1].place ?? (a[1].state === "sending" ? 0 : 999)) - (b[1].place ?? (b[1].state === "sending" ? 0 : 999)));
+  const active = items.filter(([, s]) => ["queued", "sending"].includes(s.state));
+  const recent = items.filter(([, s]) => !["queued", "sending"].includes(s.state)).slice(-4);
+  box.innerHTML = [...active, ...recent].map(([k, s]) => {
+    const pct = s.total ? Math.round(100 * s.sent / s.total) : 0;
+    const files = s.files > 1 ? ` · ${s.done_files}/${s.files} ไฟล์` : "";
+    const what = s.state === "queued" ? `รอคิว ลำดับ ${s.place}` : s.state === "sending" ? `${pct}%${files}` : s.message;
+    return `<div class="q-item" data-s="${s.state}"><div class="q-title">${esc(s.title)}</div>
+      <div class="q-meta">${esc(what)}${s.state === "queued" ? ` <button class="link" data-cancel="${k}">ยกเลิก</button>` : ""}</div>
+      ${s.state === "sending" ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}</div>`;
+  }).join("");
+  box.querySelectorAll("[data-cancel]").forEach((b) => (b.onclick = async () => {
+    const [kind, id] = b.dataset.cancel.split(":");
+    await api(`/api/x4/cancel/${kind}/${id}`, { method: "POST" }); await refreshSends(); renderQueue();
+  }));
+}
+$("#x4-all").onclick = async () => {
+  try {
+    const st = await api("/api/x4");
+    if (!st.ok) { toast(st.error || "ต่อ X4 ไม่ได้", "err"); return; }
+    const r = await api("/api/x4/send-all", { method: "POST" });
+    toast(`เข้าคิว ${r.queued.length} เล่ม · ไฟล์ที่มีในเครื่องแล้วจะข้ามไป`);
+    watchQueue();
+  } catch (e) { toast(e.message, "err"); }
+};
 async function renameJob() {
   const name = prompt("ชื่อหนังสือ", currentJob?.name || "");
   if (!name || name.trim() === currentJob?.name) return;
@@ -627,6 +658,8 @@ async function checkX4() {
   try {
     const s = await api("/api/x4");
     if (document.activeElement !== $("#x4-addr")) $("#x4-addr").value = s.address || "";
+    x4Sends = s.sends || {}; renderQueue();
+    if (Object.values(x4Sends).some((q) => ["queued", "sending"].includes(q.state))) watchQueue();
     el.textContent = s.ok ? `ต่อได้ · ${s.version ? "CrossPoint " + s.version : ""} · Wi-Fi ${s.rssi ?? "?"} dBm` : (s.error || "ต่อไม่ได้");
     el.className = "small " + (s.ok ? "ok-text" : "muted");
   } catch (e) { el.textContent = e.message; }

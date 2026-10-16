@@ -11,6 +11,7 @@ that are read with the device turned sideways (800 px of width instead of 480: t
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -194,7 +195,8 @@ class Flow:
             self.buf = None
 
 
-MAX_CHAPTERS = 64      # every chapter name is a separate small allocation on the device: keep the heap whole
+MAX_CHAPTERS = 64      # entries when there is nothing better than "every N pages"
+HEADING = re.compile(r"^\s*((?:บทที่|ตอนที่|ตอน|บท|chapter|CHAPTER|Chapter)\s*[0-9๐-๙]+[^\n]{0,60})", re.M)
 
 
 def outline(pdf: pdfium.PdfDocument) -> list[tuple[str, int]]:
@@ -202,7 +204,7 @@ def outline(pdf: pdfium.PdfDocument) -> list[tuple[str, int]]:
     out = []
     try:
         items = list(pdf.get_toc(max_depth=2))
-        if len(items) > MAX_CHAPTERS:
+        if len(items) > 3000:                                  # a huge outline: top level only
             items = [i for i in items if i.level == 0]
         for item in items:
             dest = item.get_dest()
@@ -211,6 +213,26 @@ def outline(pdf: pdfium.PdfDocument) -> list[tuple[str, int]]:
                 out.append((("  " * item.level) + item.get_title().strip()[:60], idx))
     except Exception as e:  # noqa: BLE001 - a broken outline must not stop the conversion
         log.warning("outline: %s", e)
+    return out
+
+
+def text_marks(pdf: pdfium.PdfDocument) -> list[tuple[str, int]]:
+    """Chapters from the page text when the PDF has no bookmarks: a line near the top that starts with
+    "บทที่ 12", "ตอนที่ 3", "Chapter 7"... (scanned PDFs have no text: nothing is found)."""
+    out = []
+    for i in range(len(pdf)):
+        page = pdf[i]
+        try:
+            tp = page.get_textpage()
+            head = tp.get_text_range()[:400]
+            tp.close()
+        except Exception:  # noqa: BLE001
+            head = ""
+        finally:
+            page.close()
+        m = HEADING.search(head)
+        if m:
+            out.append((re.sub(r"\s+", " ", m.group(1)).strip(), i))
     return out
 
 
@@ -223,10 +245,7 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
     try:
         n = len(pdf)
         meta = pdf.get_metadata_dict(skip_empty=True)
-        marks = [(t, p) for t, p in outline(pdf) if 0 <= p < n]
-        if len(marks) > MAX_CHAPTERS:                          # still too many: keep an even spread
-            step = len(marks) / MAX_CHAPTERS
-            marks = [marks[int(k * step)] for k in range(MAX_CHAPTERS)]
+        marks = [(t, p) for t, p in outline(pdf) if 0 <= p < n] or text_marks(pdf)
         chapter_pages = {p for _, p in marks}
         writer = Writer(o.depth)
         flow = Flow(o, lambda img: writer.add(np.asarray(img, np.uint8)))
@@ -271,8 +290,12 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
             for p in range(0, n, every):
                 end = first_of[p + every] - 1 if p + every < n else total - 1
                 chapters.append(Chapter(f"หน้า {p + 1}", first_of[p], max(first_of[p], end)))
+        def page_label(s: int, e: int) -> str:
+            """PDF pages shown on device pages s..e-1."""
+            pages = [p for p, f in enumerate(first_of) if s <= f < e] or [0]
+            return f"หน้า {pages[0] + 1}-{pages[-1] + 1}"
         writer.save_parts(dst.parent, dst.stem, title or meta.get("Title", "") or src.stem, meta.get("Author", ""),
-                          chapters, o.per_part)
+                          chapters, o.per_part, page_label)
         return total
     finally:
         pdf.close()

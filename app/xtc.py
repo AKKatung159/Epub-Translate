@@ -13,6 +13,8 @@ XTH (2-bit): two bit planes; each plane is column-major from the RIGHT edge, 8 v
 """
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import struct
 import tempfile
@@ -29,6 +31,22 @@ CHAPTER = 96
 
 # grey level (0 = black .. 255 = white) -> XTH value
 DARK_GREY, LIGHT_GREY = 1, 2
+
+
+PART_CHAPTERS = 100     # chapter entries per file: every name is a small heap allocation on the device
+NUM = re.compile(r"(บทที่|ตอนที่|ตอน|บท|chapter|ch\.?|part|เล่ม)\s*([0-9๐-๙]+)", re.I)
+THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+
+
+def part_label(chapters: list["Chapter"]) -> str:
+    """"บทที่ 1-93" from the chapter names in a part, or "" when they carry no numbers."""
+    found = [(m.group(1), int(m.group(2).translate(THAI_DIGITS))) for c in chapters if (m := NUM.search(c.name))]
+    if not found:
+        return ""
+    word = found[0][0]
+    nums = [n for _, n in found]
+    lo, hi = min(nums), max(nums)
+    return f"{word} {lo}" if lo == hi else f"{word} {lo}-{hi}"
 
 
 @dataclass
@@ -167,17 +185,20 @@ class Writer:
         self.tmp.close()
 
     def save_parts(self, folder: Path, stem: str, title: str = "", author: str = "",
-                   chapters: list[Chapter] = (), per_part: int = 600) -> list[Path]:
+                   chapters: list[Chapter] = (), per_part: int = 600,
+                   page_label=None) -> list[Path]:
         """Long books as several files of at most per_part pages: "<stem>.xtc" or "<stem> 01.xtc", "<stem> 02.xtc"...
 
         The firmware reads the whole page table into RAM (16 bytes a page) next to the page buffer: a 9,372-page
-        file wants ~150 KB of a ~380 KB heap. Each part keeps the chapters that fall inside it."""
+        file wants ~150 KB of a ~380 KB heap. Each part keeps the chapters that fall inside it (at most
+        PART_CHAPTERS, evenly spread) and gets a label from them ("บทที่ 1-93"), or from page_label(start, end)
+        ("หน้า 1-245"). Labels go to "<stem>.parts.json" next to the files."""
         n = len(self.sizes)
         if not n:
             raise ValueError("no pages")
         parts = -(-n // per_part)
         ext = ".xtch" if self.depth == 2 else ".xtc"
-        out = []
+        out, index = [], []
         for k in range(parts):
             s, e = k * per_part, min(n, (k + 1) * per_part)
             mine = [Chapter(c.name, max(c.first, s) - s, min(c.last, e - 1) - s)
@@ -185,10 +206,18 @@ class Writer:
             if parts > 1 and (not mine or mine[0].first > 0):
                 lead = next((c for c in reversed(chapters) if c.first <= s), None)   # chapter running into this part
                 mine.insert(0, Chapter(lead.name if lead else title, 0, (mine[0].first - 1) if mine else e - s - 1))
+            label = part_label(mine) or (page_label(s, e) if page_label else "")
+            if len(mine) > PART_CHAPTERS:                   # keep the first, then an even spread
+                step = len(mine) / PART_CHAPTERS
+                kept = [mine[int(i * step)] for i in range(PART_CHAPTERS)]
+                mine = [Chapter(c.name, c.first, (kept[i + 1].first - 1) if i + 1 < len(kept) else e - s - 1)
+                        for i, c in enumerate(kept)]
             name = f"{stem}{ext}" if parts == 1 else f"{stem} {k + 1:02d}{ext}"
-            label = title if parts == 1 else f"{title} ({k + 1}/{parts})"
-            self._write(folder / name, s, e, label, author, mine)
+            shown = title if parts == 1 else f"{k + 1:02d}/{parts} {label + ' · ' if label else ''}{title}"
+            self._write(folder / name, s, e, shown, author, mine)
             out.append(folder / name)
+            index.append({"file": name, "label": label, "pages": e - s})
+        (folder / f"{stem}.parts.json").write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
         self.tmp.close()
         return out
 

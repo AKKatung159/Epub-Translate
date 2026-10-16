@@ -364,3 +364,13 @@ td.del-cell button:hover { color: var(--bad); }
 .x4-box code { word-break: break-all; }
 .x4-line { margin-bottom: 8px; }
 .ok-text { color: var(--ok); }
+
+#x4-all { margin-top: 10px; }
+.x4-queue { display: grid; gap: 8px; margin-top: 10px; }
+.x4-queue:empty { display: none; }
+.q-item { background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.q-title { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-meta { font-size: 12.5px; color: var(--muted); }
+.q-item[data-s=error] .q-meta { color: var(--bad); }
+.q-item[data-s=done] .q-meta { color: var(--ok); }
+.q-item .bar { margin-top: 6px; height: 4px; }
