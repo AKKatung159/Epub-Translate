@@ -57,8 +57,8 @@ def _fit(img: Image.Image, w: int, h: int) -> Image.Image:
     return img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))), Image.LANCZOS)
 
 
-# a line may break before any character except these (Thai vowels / tone marks above and below, sara am)
-_JOINS = set(range(0x0E31, 0x0E32)) | set(range(0x0E33, 0x0E3B)) | set(range(0x0E47, 0x0E4F))
+# a line may break before any character except these (Thai vowels and tone marks that follow a consonant)
+_JOINS = set(range(0x0E31, 0x0E3B)) | {0x0E45} | set(range(0x0E47, 0x0E4F))
 
 
 def wrap(text: str, f, width: int, max_lines: int) -> list[str]:
