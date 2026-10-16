@@ -500,7 +500,7 @@ async function loadPdfs() {
   box.innerHTML = items.map((d) => {
     const o = d.options, pct = d.pdf_pages ? Math.round(100 * d.done_pages / d.pdf_pages) : 0;
     const mb = d.out_size ? ` · ${(d.out_size / 1048576).toFixed(1)} MB` : "";
-    const meta = d.status === "done" ? `${d.pdf_pages} หน้า PDF → ${d.out_pages} หน้าจอ${mb} · ${MODE_LABEL[o.mode] || o.mode}${o.depth == 1 ? " · ขาวดำ" : ""}`
+    const meta = d.status === "done" ? `${d.pdf_pages} หน้า PDF → ${d.out_pages} หน้าจอ${mb} · ${MODE_LABEL[o.mode] || o.mode}${o.depth == 2 ? " · เทา 4 ระดับ" : " · ขาวดำ"}`
       : `${d.pdf_pages} หน้า PDF · ${d.message || ""}`;
     const open = pdfOpen?.id === d.id;
     const panel = open && d.status === "done" ? `
@@ -510,7 +510,7 @@ async function loadPdfs() {
         <div class="row">
           ${optSel("o-mode", o.mode, Object.entries(MODE_LABEL))}
           ${optSel("o-rotate", o.rotate, [["cw", "หมุนทวนเข็ม"], ["ccw", "หมุนตามเข็ม"]])}
-          ${optSel("o-depth", o.depth, [["2", "เทา 4 ระดับ"], ["1", "ขาวดำ"]])}
+          ${optSel("o-depth", o.depth, [["1", "ขาวดำ"], ["2", "เทา 4 ระดับ"]])}
           <label class="small"><input type="checkbox" class="o-trim" ${o.trim ? "checked" : ""}> ตัดหัว/เลขหน้า</label>
           <button data-a="redo">แปลงใหม่ด้วยค่านี้</button>
         </div>

@@ -72,8 +72,10 @@ main { max-width: 1120px; margin: 0 auto; padding: 24px 20px 120px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .card-head h2 { margin: 0; }
 
-.list-grid { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 18px; align-items: start; }
+.list-grid { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 18px; align-items: start; }
 .list-grid .card + .card { margin-top: 0; }
+.list-grid > *, #job-view > * { min-width: 0; }
+input, select, textarea { max-width: 100%; }
 
 /* ============================================================================ controls */
 button { font: inherit; font-weight: 500; min-height: var(--tap); padding: 0 16px; border-radius: var(--radius-sm);
@@ -132,13 +134,15 @@ input[type=checkbox] { min-height: auto; width: 18px; height: 18px; accent-color
 .drop-sub { color: var(--muted); font-size: 13px; }
 .file-name { margin-top: 8px; font-size: 13px; font-weight: 500; color: var(--accent); word-break: break-all; }
 .file-name:empty { display: none; }
-.opts { margin: 16px 0 14px; display: grid; gap: 4px; }
+.opts { margin: 16px 0 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.field select, .field textarea, .field input { width: 100%; min-width: 0; }
+.switch-text { min-width: 0; }
 .more { margin-top: 4px; }
 .more summary { cursor: pointer; color: var(--ink-2); font-size: 14px; padding: 6px 0; }
 .more textarea { margin-top: 6px; }
 
 /* ============================================================================ job list */
-.job { display: grid; grid-template-columns: 1fr auto; gap: 2px 14px; padding: 14px 4px; border-top: 1px solid var(--line-2); cursor: pointer;
+.job { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 14px; padding: 14px 4px; border-top: 1px solid var(--line-2); cursor: pointer;
        border-radius: 10px; transition: background .15s; }
 .job:first-child { border-top: 0; }
 .job:hover { background: var(--surface-2); }
@@ -247,7 +251,7 @@ td.del-cell button:hover { color: var(--bad); }
 
 /* ============================================================================ paragraphs (preview / review) */
 .doc-select { width: 100%; max-width: 520px; margin-bottom: 8px; }
-.seg { display: grid; grid-template-columns: 1fr 1.15fr; gap: 20px; padding: 16px 0; border-top: 1px solid var(--line-2); }
+.seg { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px; padding: 16px 0; border-top: 1px solid var(--line-2); }
 .seg:first-child { border-top: 0; }
 .seg .src { color: var(--muted); font-size: 14px; line-height: 1.65; }
 .seg .tgt { font-family: var(--font-read); font-size: 16.5px; line-height: 1.85; }
@@ -272,12 +276,13 @@ td.del-cell button:hover { color: var(--bad); }
 
 /* ============================================================================ tablet */
 @media (max-width: 900px) {
-  .list-grid { grid-template-columns: 1fr; }
+  .list-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ============================================================================ phone */
 @media (max-width: 640px) {
   main { padding: 14px 14px calc(110px + env(safe-area-inset-bottom)); }
+  .top { position: static; }
   .top-inner { padding: 10px 14px; }
   .brand-sub { display: none; }
   .pill { font-size: 12px; padding: 5px 10px; }
@@ -289,21 +294,21 @@ td.del-cell button:hover { color: var(--bad); }
   .steps { margin: 14px -4px; }
   .steps li { font-size: 11px; }
   .pct { font-size: 28px; }
-  .stats { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stats { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 
   /* the main actions stay at the bottom of the screen; occasional ones stay in the card */
   .actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; margin: 0;
              padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
              background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
              border-top: 1px solid var(--line); flex-wrap: nowrap; }
-  .actions button { flex: 1 1 0; min-width: 0; padding: 0 10px; white-space: nowrap; }
-  .actions button.primary { flex: 1.6 1 0; }
+  .actions button { flex: 1 1 auto; min-width: 0; padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .actions button.primary { flex: 1.4 1 auto; }
   .action-area { margin-top: 14px; }
   .actions-more { width: 100%; }
   .actions-more button { flex: 1 1 auto; font-size: 14px; min-height: 38px; }
   #list-view ~ #toasts, #toasts { bottom: calc(84px + env(safe-area-inset-bottom)); }
 
-  .tabs { position: sticky; top: 57px; z-index: 15; margin: 14px -14px 10px; border-radius: 0; padding: 6px 14px;
+  .tabs { position: sticky; top: 0; z-index: 15; margin: 14px -14px 10px; border-radius: 0; padding: 6px 14px;
           background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
   .tabs button { flex: 0 0 auto; padding: 0 14px; }
 
@@ -311,14 +316,14 @@ td.del-cell button:hover { color: var(--bad); }
   .toolbar select, .toolbar button { flex: 1 1 auto; }
   .toolbar .grow { display: none; }
 
-  .seg { grid-template-columns: 1fr; gap: 8px; padding: 14px 0; }
+  .seg { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 0; }
   .seg .src { font-size: 13px; }
 
   /* glossary: one card per term */
   .table-wrap { border: 0; overflow: visible; }
   #g-table, #g-table tbody, #g-table tr, #g-table td { display: block; width: 100%; }
   #g-table thead { display: none; }
-  #g-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; padding: 14px; margin-bottom: 10px;
+  #g-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 10px; padding: 14px; margin-bottom: 10px;
                 background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 12px; }
   #g-table td { border: 0; padding: 0; background: transparent !important; }
   #g-table td::before { content: attr(data-label); display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 2px; }

@@ -336,7 +336,7 @@ def _pdf_or_404(pid: str) -> dict:
 class PdfOptions(BaseModel):
     mode: str = "auto"
     rotate: str = "cw"
-    depth: int = 2
+    depth: int = 1
     trim: bool = True
 
     def checked(self) -> dict:
@@ -353,7 +353,7 @@ def list_pdfs():
 
 @app.post("/api/pdf")
 def create_pdf(file: UploadFile = File(...), mode: str = Form("auto"), rotate: str = Form("cw"),
-               depth: int = Form(2), trim: bool = Form(True)):
+               depth: int = Form(1), trim: bool = Form(True)):
     import pypdfium2 as pdfium
     opts = PdfOptions(mode=mode, rotate=rotate, depth=depth, trim=trim).checked()
     name = re.sub(r"\.pdf$", "", file.filename or "document", flags=re.I)
@@ -433,7 +433,7 @@ def preview_pdf(pid: str, n: int):
         off, size = int.from_bytes(entry[:8], "little"), int.from_bytes(entry[8:12], "little")
         f.seek(off)
         data = f.read(size)
-    img = Image.fromarray(decode_page(data, int(d["options"].get("depth", 2))))
+    img = Image.fromarray(decode_page(data, int(d["options"].get("depth", 1))))
     if d["options"].get("mode") != "page":
         img = img.transpose(Image.ROTATE_90 if d["options"].get("rotate", "cw") == "cw" else Image.ROTATE_270)
     buf = io.BytesIO()

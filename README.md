@@ -47,13 +47,16 @@ No model involved; it runs on its own queue, so it never waits behind a translat
   line when a gap exists). Strips flow across PDF pages so none is half empty; a chapter starts on a fresh strip.
   Read with the device turned sideways: text ~1.67× larger than a whole page upright.
 - **At most 3 / 4 strips per page**: smaller text on big pages, fewer page turns. **Whole page**: pictures, forms.
-- PDF bookmarks become the chapter menu (top two levels); without bookmarks, one entry per 10 PDF pages.
+- PDF bookmarks become the chapter menu (top two levels, at most 64); without bookmarks, evenly spaced entries.
+- **Black/white (.xtc) by default.** The firmware mallocs one whole page each turn: 48 KB for XTC, 96 KB for
+  4-grey XTCH. A 70 MB XTCH book gave "Memory error" on the X4 (no 96 KB block left in a fragmented heap); XTC
+  halves both the request and the file. Strokes are thresholded at 170/255 so small text stays whole.
 - Preview any device page in the browser and convert again with other options from the same upload.
 - Format written from the firmware's own parser (`lib/Xtc`): header 56 bytes, title/author, 96-byte chapter
   records, page table, XTG/XTH pages (XTH: two bit planes, column-major from the right edge; 0 white, 1 dark grey,
   2 light grey, 3 black). `tests/test_pdfxtc.py` decodes pages the way the firmware does.
 
-Speed: ~25 PDF pages per second (measured on the ROG Ally; the apps VM may be slower); an A5 novel page → ~2.4 device pages (~95 KB each in 4 greys).
+Speed: ~25 PDF pages per second (measured on the ROG Ally; the apps VM may be slower); an A5 novel page → ~2.4 device pages (~48 KB each in black/white, ~95 KB in 4 greys).
 
 ## Models
 

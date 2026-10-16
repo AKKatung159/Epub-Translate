@@ -32,7 +32,9 @@ MODES = ("auto", "3", "4", "page")
 class Options:
     mode: str = "auto"
     rotate: str = "cw"          # landscape strips: "cw" = top of the text on the right edge of the screen
-    depth: int = 2              # 2 = 4 greys (XTCH, smoother text), 1 = black/white (XTC, half the size)
+    # 1 = black/white XTC (default), 2 = 4 greys XTCH. The X4 firmware mallocs one whole page per turn: 48 KB for
+    # XTC but 96 KB for XTCH, which a fragmented heap often cannot give ("Memory error" on a 70 MB XTCH book).
+    depth: int = 1
     margin: int = 6             # px of white kept around the cropped content
     trim: bool = True           # drop running headers / page numbers (a lone short line at the very top/bottom)
 
@@ -185,15 +187,21 @@ class Flow:
             self.buf = None
 
 
+MAX_CHAPTERS = 64      # every chapter name is a separate small allocation on the device: keep the heap whole
+
+
 def outline(pdf: pdfium.PdfDocument) -> list[tuple[str, int]]:
-    """(title, 0-based page) for the PDF bookmarks, top two levels."""
+    """(title, 0-based page) for the PDF bookmarks: top level, plus the second level only if all of it fits."""
     out = []
     try:
-        for item in pdf.get_toc(max_depth=2):
+        items = list(pdf.get_toc(max_depth=2))
+        if len(items) > MAX_CHAPTERS:
+            items = [i for i in items if i.level == 0]
+        for item in items:
             dest = item.get_dest()
             idx = dest.get_index() if dest is not None else None
             if idx is not None and item.get_title():
-                out.append((("  " * item.level) + item.get_title().strip(), idx))
+                out.append((("  " * item.level) + item.get_title().strip()[:60], idx))
     except Exception as e:  # noqa: BLE001 - a broken outline must not stop the conversion
         log.warning("outline: %s", e)
     return out
@@ -208,6 +216,9 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
         n = len(pdf)
         meta = pdf.get_metadata_dict(skip_empty=True)
         marks = [(t, p) for t, p in outline(pdf) if 0 <= p < n]
+        if len(marks) > MAX_CHAPTERS:                          # still too many: keep an even spread
+            step = len(marks) / MAX_CHAPTERS
+            marks = [marks[int(k * step)] for k in range(MAX_CHAPTERS)]
         chapter_pages = {p for _, p in marks}
         writer = Writer(o.depth)
         flow = Flow(o, lambda img: writer.add(np.asarray(img, np.uint8)))
@@ -242,8 +253,9 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
             chapters.append(Chapter(t, start, max(start, end)))
         if not chapters and n > 1:
             # no bookmarks: one entry every 10 PDF pages, so the chapter menu still works as "go to page"
-            for p in range(0, n, 10):
-                end = first_of[p + 10] - 1 if p + 10 < n else total - 1
+            every = max(10, -(-n // MAX_CHAPTERS))
+            for p in range(0, n, every):
+                end = first_of[p + every] - 1 if p + every < n else total - 1
                 chapters.append(Chapter(f"หน้า {p + 1}", first_of[p], max(first_of[p], end)))
         writer.save(dst, title or meta.get("Title", "") or src.stem, meta.get("Author", ""), chapters)
         return total

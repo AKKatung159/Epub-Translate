@@ -51,7 +51,8 @@ def encode_page(gray: np.ndarray, depth: int) -> bytes:
     """gray: uint8 array (800, 480), 0 = black. Returns XTG/XTH page header + bitmap."""
     assert gray.shape == (H, W), gray.shape
     if depth == 1:
-        bitmap = np.packbits(gray >= 128, axis=1).tobytes()           # 1 = white
+        # 1 = white. 170, not 128: anti-aliased strokes of small text stay whole instead of breaking up
+        bitmap = np.packbits(gray >= 170, axis=1).tobytes()
         magic = XTG
     else:
         v = levels4(gray)

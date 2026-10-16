@@ -45,7 +45,7 @@ def new(name: str, pages: int, options: dict) -> str:
 
 
 def output(d: dict) -> Path:
-    return pdf_dir(d["id"]) / ("book" + EXT[int(d["options"].get("depth", 2))])
+    return pdf_dir(d["id"]) / ("book" + EXT[int(d["options"].get("depth", 1))])
 
 
 def set_status(pid: str, status: str, message: str = "", **cols) -> None:
@@ -72,7 +72,7 @@ def _loop() -> None:
 def _run(pid: str) -> None:
     d = row(pid)
     o = d["options"]
-    opts = Options(mode=o.get("mode", "auto"), rotate=o.get("rotate", "cw"), depth=int(o.get("depth", 2)),
+    opts = Options(mode=o.get("mode", "auto"), rotate=o.get("rotate", "cw"), depth=int(o.get("depth", 1)),
                    trim=bool(o.get("trim", True)))
     for old in pdf_dir(pid).glob("book.*"):
         old.unlink()

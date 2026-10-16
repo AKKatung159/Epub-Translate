@@ -79,7 +79,7 @@ def test_pdf_to_xtc_end_to_end(tmp_path):
     pages[0].save(pdf, save_all=True, append_images=pages[1:], resolution=150)
     out = tmp_path / "doc.xtch"
     seen = []
-    n = convert(pdf, out, Options(mode="auto"), progress=lambda i, total, dev: seen.append((i, total)))
+    n = convert(pdf, out, Options(mode="auto", depth=2), progress=lambda i, total, dev: seen.append((i, total)))
     info = read_info(out)
     assert n == len(info["pages"]) and seen[-1] == (3, 3)
     # each page body is ~1,870 px tall once 800 px wide: 3 pages flow into ~12 full strips of <= 480 px
@@ -89,3 +89,19 @@ def test_pdf_to_xtc_end_to_end(tmp_path):
     whole = tmp_path / "page.xtc"
     assert convert(pdf, whole, Options(mode="page", depth=1)) == 3
     assert read_info(whole)["magic"] == b"XTC\0"
+
+
+def test_default_is_black_white_and_chapters_stay_few(tmp_path):
+    """The X4 needs one malloc of a whole page: 48 KB (XTC) is far safer than 96 KB (XTCH); many chapter names
+    fragment its heap. Defaults: XTC, at most 64 chapters (even without bookmarks on a long PDF)."""
+    from app.pdfslice import MAX_CHAPTERS
+    assert Options().depth == 1
+    page = Image.new("RGB", (200, 300), "white")
+    ImageDraw.Draw(page).rectangle((20, 20, 180, 40), fill="black")
+    pdf = tmp_path / "long.pdf"
+    page.save(pdf, save_all=True, append_images=[page] * 699, resolution=72)
+    out = tmp_path / "long.xtc"
+    convert(pdf, out, Options(mode="page"))
+    info = read_info(out)
+    assert info["magic"] == b"XTC\0" and len(info["pages"]) == 700
+    assert 1 < len(info["chapters"]) <= MAX_CHAPTERS
