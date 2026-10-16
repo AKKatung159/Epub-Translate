@@ -343,6 +343,10 @@ td.del-cell button:hover { color: var(--bad); }
 .pdf-item:hover { background: none; }
 .pdf-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .pdf-actions button { min-height: 36px; padding: 0 12px; font-size: 14px; }
+.pdf-item .note, .pdf-parts { grid-column: 1 / -1; margin-top: 8px; }
+.pdf-item .note { font-size: 13px; color: var(--warn); }
+.pdf-part-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 6px; margin-top: 8px; }
+.pdf-part-links a { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--accent); text-decoration: none; font-size: 14px; }
 .pdf-panel { grid-column: 1 / -1; margin-top: 12px; display: grid; gap: 10px; }
 .pdf-panel img { width: 100%; max-width: 560px; border: 1px solid var(--line); border-radius: 8px; background: #fff; justify-self: center; }
 .pdf-panel .row { justify-content: center; }

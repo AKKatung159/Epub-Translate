@@ -37,6 +37,7 @@ class Options:
     depth: int = 1
     margin: int = 6             # px of white kept around the cropped content
     trim: bool = True           # drop running headers / page numbers (a lone short line at the very top/bottom)
+    per_part: int = 600         # device pages per file; the X4 keeps a 16-byte entry per page in RAM
 
 
 def ink_box(gray: np.ndarray) -> tuple[int, int, int, int] | None:
@@ -210,7 +211,8 @@ def outline(pdf: pdfium.PdfDocument) -> list[tuple[str, int]]:
 def convert(src: Path, dst: Path, o: Options, title: str = "",
             progress: Callable[[int, int, int], None] | None = None,
             should_stop: Callable[[], bool] | None = None) -> int:
-    """Write dst (.xtch / .xtc). Returns the number of device pages."""
+    """Write dst (.xtch / .xtc), or "<stem> 01.xtc", "<stem> 02.xtc"... next to it when the book is longer than
+    o.per_part device pages. Returns the number of device pages."""
     pdf = pdfium.PdfDocument(str(src))
     try:
         n = len(pdf)
@@ -257,7 +259,8 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
             for p in range(0, n, every):
                 end = first_of[p + every] - 1 if p + every < n else total - 1
                 chapters.append(Chapter(f"หน้า {p + 1}", first_of[p], max(first_of[p], end)))
-        writer.save(dst, title or meta.get("Title", "") or src.stem, meta.get("Author", ""), chapters)
+        writer.save_parts(dst.parent, dst.stem, title or meta.get("Title", "") or src.stem, meta.get("Author", ""),
+                          chapters, o.per_part)
         return total
     finally:
         pdf.close()

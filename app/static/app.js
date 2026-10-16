@@ -500,9 +500,15 @@ async function loadPdfs() {
   box.innerHTML = items.map((d) => {
     const o = d.options, pct = d.pdf_pages ? Math.round(100 * d.done_pages / d.pdf_pages) : 0;
     const mb = d.out_size ? ` · ${(d.out_size / 1048576).toFixed(1)} MB` : "";
-    const meta = d.status === "done" ? `${d.pdf_pages} หน้า PDF → ${d.out_pages} หน้าจอ${mb} · ${MODE_LABEL[o.mode] || o.mode}${o.depth == 2 ? " · เทา 4 ระดับ" : " · ขาวดำ"}`
+    const nparts = d.parts?.length || 0;
+    const meta = d.status === "done" ? `${d.pdf_pages} หน้า PDF → ${d.out_pages} หน้าจอ${nparts > 1 ? ` (${nparts} ไฟล์)` : ""}${mb} · ${MODE_LABEL[o.mode] || o.mode}${o.depth == 2 ? " · เทา 4 ระดับ" : " · ขาวดำ"}`
       : `${d.pdf_pages} หน้า PDF · ${d.message || ""}`;
     const open = pdfOpen?.id === d.id;
+    // made before the X4 fixes: one file too long for its memory, or 4 greys (96 KB per page)
+    const risky = d.status === "done" && (d.parts?.some((p) => p.pages > 600) || o.depth == 2);
+    const warn = risky ? `<div class="note">⚠ ${o.depth == 2 ? "เทา 4 ระดับใช้หน่วยความจำเครื่องมาก" : "ไฟล์ยาวเกินที่ X4 เปิดได้"} อาจขึ้น Memory error บน X4 · กด "ดูตัวอย่าง / ปรับ" แล้วแปลงใหม่เป็นขาวดำ</div>` : "";
+    const partList = nparts > 1 ? `<details class="pdf-parts"><summary class="small">ดาวน์โหลดทีละไฟล์ (${nparts} ไฟล์ ไม่เกิน 600 หน้าจอต่อไฟล์)</summary>
+        <div class="pdf-part-links">${d.parts.map((p, k) => `<a href="/api/pdf/${d.id}/download?part=${k + 1}">${String(k + 1).padStart(2, "0")} · ${p.pages} หน้าจอ · ${(p.size / 1048576).toFixed(1)} MB</a>`).join("")}</div></details>` : "";
     const panel = open && d.status === "done" ? `
       <div class="pdf-panel">
         <img src="/api/pdf/${d.id}/preview/${pdfOpen.n}" alt="ตัวอย่างหน้าจอ ${pdfOpen.n + 1}">
@@ -520,13 +526,15 @@ async function loadPdfs() {
       <div class="job-title">${esc(d.name)}</div>
       <div class="job-side"><span class="chip" data-s="${d.status}">${PDF_STATUS[d.status] || d.status}</span></div>
       <div class="job-meta">${esc(meta)}</div>
+      ${warn}
       ${["queued", "converting"].includes(d.status) ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}
       <div class="pdf-actions">
-        ${d.status === "done" ? `<button class="primary" data-a="dl">${icon("download")}ดาวน์โหลด</button>
+        ${d.status === "done" ? `<button class="primary" data-a="dl">${icon("download")}${nparts > 1 ? "ดาวน์โหลดทั้งหมด (.zip)" : "ดาวน์โหลด"}</button>
           <button data-a="preview">${open ? "ซ่อนตัวอย่าง" : "ดูตัวอย่าง / ปรับ"}</button>` : ""}
         ${d.status === "error" ? `<button data-a="retry">ลองใหม่</button>` : ""}
         <button class="danger" data-a="del">ลบ</button>
       </div>
+      ${partList}
       ${panel}
     </div>`;
   }).join("");

@@ -102,7 +102,39 @@ class Writer:
         return len(self.sizes)
 
     def save(self, path: Path, title: str = "", author: str = "", chapters: list[Chapter] = ()) -> None:
+        """Everything in one file (see save_parts for long books)."""
+        self._write(path, 0, len(self.sizes), title, author, chapters)
+        self.tmp.close()
+
+    def save_parts(self, folder: Path, stem: str, title: str = "", author: str = "",
+                   chapters: list[Chapter] = (), per_part: int = 600) -> list[Path]:
+        """Long books as several files of at most per_part pages: "<stem>.xtc" or "<stem> 01.xtc", "<stem> 02.xtc"...
+
+        The firmware reads the whole page table into RAM (16 bytes a page) next to the page buffer: a 9,372-page
+        file wants ~150 KB of a ~380 KB heap. Each part keeps the chapters that fall inside it."""
         n = len(self.sizes)
+        if not n:
+            raise ValueError("no pages")
+        parts = -(-n // per_part)
+        ext = ".xtch" if self.depth == 2 else ".xtc"
+        out = []
+        for k in range(parts):
+            s, e = k * per_part, min(n, (k + 1) * per_part)
+            mine = [Chapter(c.name, max(c.first, s) - s, min(c.last, e - 1) - s)
+                    for c in chapters if c.first < e and c.last >= s]
+            if parts > 1 and (not mine or mine[0].first > 0):
+                lead = next((c for c in reversed(chapters) if c.first <= s), None)   # chapter running into this part
+                mine.insert(0, Chapter(lead.name if lead else title, 0, (mine[0].first - 1) if mine else e - s - 1))
+            name = f"{stem}{ext}" if parts == 1 else f"{stem} {k + 1:02d}{ext}"
+            label = title if parts == 1 else f"{title} ({k + 1}/{parts})"
+            self._write(folder / name, s, e, label, author, mine)
+            out.append(folder / name)
+        self.tmp.close()
+        return out
+
+    def _write(self, path: Path, start: int, end: int, title: str, author: str, chapters) -> None:
+        sizes = self.sizes[start:end]
+        n = len(sizes)
         if not n:
             raise ValueError("no pages")
         chapters = [c for c in chapters if 0 <= c.first <= c.last < n][:500]
@@ -115,14 +147,17 @@ class Writer:
         with open(path, "wb") as f:
             f.write(header + _fixed(title, 128) + _fixed(author, 64))
             for c in chapters:
-                f.write(_fixed(c.name, 80) + struct.pack("<HH", c.first + 1, c.last + 1) + b"\0" * 12)
+                f.write(_fixed(c.name, 80) + struct.pack("<HH", c.first + 1, c.last + 1) + bytes(12))
             off = data_off
-            for size in self.sizes:
+            for size in sizes:
                 f.write(struct.pack("<QIHH", off, size, W, H))
                 off += size
-            self.tmp.seek(0)
-            shutil.copyfileobj(self.tmp, f, 1 << 20)
-        self.tmp.close()
+            self.tmp.seek(sum(self.sizes[:start]))
+            left = sum(sizes)
+            while left:
+                chunk = self.tmp.read(min(left, 1 << 20))
+                f.write(chunk)
+                left -= len(chunk)
 
 
 def read_info(path: Path) -> dict:

@@ -322,8 +322,26 @@ def download(jid: str, bilingual: bool | None = None):
 # PDF -> Xteink X4 -------------------------------------------------------------------------------------------
 
 def _pdf_summary(d: dict) -> dict:
-    return {k: d[k] for k in ("id", "name", "created", "status", "message", "options", "pdf_pages", "done_pages",
-                              "out_pages", "out_size")}
+    out = {k: d[k] for k in ("id", "name", "created", "status", "message", "options", "pdf_pages", "done_pages",
+                             "out_pages", "out_size")}
+    files = pdfworker.parts(d) if d["status"] == "done" else []
+    out["parts"] = [{"pages": _xtc_count(f), "size": f.stat().st_size} for f in files]
+    return out
+
+
+def _xtc_count(path) -> int:
+    with open(path, "rb") as f:
+        return int.from_bytes(f.read(8)[6:8], "little")
+
+
+def _safe_name(name: str) -> str:
+    return re.sub(r"[\\/:*?\"<>|]+", "_", name)[:120]
+
+
+def _attachment(path, fname: str, media: str = "application/octet-stream") -> FileResponse:
+    ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
+    return FileResponse(path, media_type=media, headers={
+        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
 
 
 def _pdf_or_404(pid: str) -> dict:
@@ -401,39 +419,58 @@ def delete_pdf(pid: str):
 
 
 @app.get("/api/pdf/{pid}/download")
-def download_pdf(pid: str):
+def download_pdf(pid: str, part: int | None = None):
+    """One file, part n (1-based) of a long book, or all parts in one zip (made once, kept until reconverted)."""
+    import zipfile
     d = _pdf_or_404(pid)
-    path = pdfworker.output(d)
-    if d["status"] != "done" or not path.exists():
+    files = pdfworker.parts(d)
+    if d["status"] != "done" or not files:
         raise HTTPException(409, "ยังแปลงไม่เสร็จ")
-    fname = re.sub(r"[\\/:*?\"<>|]+", "_", d["name"])[:120] + path.suffix
-    ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
-    return FileResponse(path, media_type="application/octet-stream", headers={
-        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
+    base = _safe_name(d["name"])
+    if len(files) == 1 or part is not None:
+        k = (part or 1) - 1
+        if not 0 <= k < len(files):
+            raise HTTPException(404, "ไม่มีไฟล์นี้")
+        tag = f" {k + 1:02d}" if len(files) > 1 else ""
+        return _attachment(files[k], f"{base}{tag}{files[k].suffix}")
+    zpath = pdfworker.pdf_dir(pid) / "all.zip"
+    if not zpath.exists():
+        tmp = zpath.with_suffix(".tmp")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as z:   # 1-bit pages shrink ~4x
+            for k, f in enumerate(files):
+                z.write(f, f"{base} {k + 1:02d}{f.suffix}")
+        tmp.replace(zpath)
+    return _attachment(zpath, f"{base}.zip", "application/zip")
 
 
 @app.get("/api/pdf/{pid}/preview/{n}")
 def preview_pdf(pid: str, n: int):
-    """Device page n as PNG, turned upright the way it is read (what the X4 will show)."""
+    """Device page n (counted over all parts) as PNG, turned upright the way it is read."""
     import io
     from PIL import Image
     from .xtc import decode_page
     d = _pdf_or_404(pid)
-    path = pdfworker.output(d)
-    if d["status"] != "done" or not path.exists():
+    files = pdfworker.parts(d)
+    if d["status"] != "done" or not files:
         raise HTTPException(409, "ยังแปลงไม่เสร็จ")
+    for path in files:
+        count = _xtc_count(path)
+        if n < count:
+            break
+        n -= count
+    else:
+        raise HTTPException(404, "ไม่มีหน้านี้")
+    if n < 0:
+        raise HTTPException(404, "ไม่มีหน้านี้")
     with open(path, "rb") as f:
         head = f.read(56)
-        count = int.from_bytes(head[6:8], "little")
-        if not 0 <= n < count:
-            raise HTTPException(404, "ไม่มีหน้านี้")
         table = int.from_bytes(head[0x18:0x20], "little")
         f.seek(table + 16 * n)
         entry = f.read(16)
         off, size = int.from_bytes(entry[:8], "little"), int.from_bytes(entry[8:12], "little")
         f.seek(off)
         data = f.read(size)
-    img = Image.fromarray(decode_page(data, int(d["options"].get("depth", 1))))
+    img = Image.fromarray(decode_page(data, 2 if path.suffix == ".xtch" else 1))
     if d["options"].get("mode") != "page":
         img = img.transpose(Image.ROTATE_90 if d["options"].get("rotate", "cw") == "cw" else Image.ROTATE_270)
     buf = io.BytesIO()

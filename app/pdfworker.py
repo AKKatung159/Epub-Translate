@@ -45,7 +45,19 @@ def new(name: str, pages: int, options: dict) -> str:
 
 
 def output(d: dict) -> Path:
+    """Where convert() writes: "book.xtc", or "book 01.xtc", "book 02.xtc"... for a long book."""
     return pdf_dir(d["id"]) / ("book" + EXT[int(d["options"].get("depth", 1))])
+
+
+def parts(d: dict) -> list[Path]:
+    o = output(d)
+    single = o.parent / o.name
+    if single.exists():
+        return [single]
+    return sorted(o.parent.glob(f"book [0-9][0-9]{o.suffix}"))
+
+
+PART_PAGES = settings.pdf_part_pages
 
 
 def set_status(pid: str, status: str, message: str = "", **cols) -> None:
@@ -73,9 +85,9 @@ def _run(pid: str) -> None:
     d = row(pid)
     o = d["options"]
     opts = Options(mode=o.get("mode", "auto"), rotate=o.get("rotate", "cw"), depth=int(o.get("depth", 1)),
-                   trim=bool(o.get("trim", True)))
-    for old in pdf_dir(pid).glob("book.*"):
-        old.unlink()
+                   trim=bool(o.get("trim", True)), per_part=PART_PAGES)
+    for old in [*pdf_dir(pid).glob("book*.xtc*"), pdf_dir(pid) / "all.zip"]:
+        old.unlink(missing_ok=True)
     set_status(pid, "converting", "กำลังแปลงหน้า…", done_pages=0, out_pages=0)
     t0 = time.time()
 
@@ -92,15 +104,15 @@ def _run(pid: str) -> None:
     try:
         pages = convert(pdf_dir(pid) / "source.pdf", dst, opts, d["name"], progress, stop)
     except InterruptedError:
-        dst.unlink(missing_ok=True)
         return
     except Exception as e:  # noqa: BLE001
         log.exception("pdf %s failed", pid)
-        dst.unlink(missing_ok=True)
         set_status(pid, "error", f"แปลงไม่สำเร็จ: {e}")
         return
     took = time.time() - t0
-    set_status(pid, "done", f"เสร็จใน {took:.0f} วินาที", out_pages=pages, out_size=dst.stat().st_size)
+    files = parts(d)
+    size = sum(f.stat().st_size for f in files)
+    note = f" · {len(files)} ไฟล์" if len(files) > 1 else ""
+    set_status(pid, "done", f"เสร็จใน {took:.0f} วินาที{note}", out_pages=pages, out_size=size)
     if took > 120:                                   # only long ones are worth a message
-        notify.send(f"PDF พร้อมอ่านบน X4: {d['name']}", f"{pages} หน้าจอ · {dst.stat().st_size / 1048576:.1f} MB",
-                    "ok")
+        notify.send(f"PDF พร้อมอ่านบน X4: {d['name']}", f"{pages} หน้าจอ · {size / 1048576:.1f} MB{note}", "ok")

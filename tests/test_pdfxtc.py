@@ -100,8 +100,11 @@ def test_default_is_black_white_and_chapters_stay_few(tmp_path):
     ImageDraw.Draw(page).rectangle((20, 20, 180, 40), fill="black")
     pdf = tmp_path / "long.pdf"
     page.save(pdf, save_all=True, append_images=[page] * 699, resolution=72)
-    out = tmp_path / "long.xtc"
-    convert(pdf, out, Options(mode="page"))
-    info = read_info(out)
-    assert info["magic"] == b"XTC\0" and len(info["pages"]) == 700
-    assert 1 < len(info["chapters"]) <= MAX_CHAPTERS
+    assert convert(pdf, tmp_path / "long.xtc", Options(mode="page")) == 700
+    # longer than one part (600): two files, each with its own page table and the chapters inside it
+    a, b = read_info(tmp_path / "long 01.xtc"), read_info(tmp_path / "long 02.xtc")
+    assert not (tmp_path / "long.xtc").exists()
+    assert a["magic"] == b"XTC\0" and len(a["pages"]) == 600 and len(b["pages"]) == 100
+    assert a["title"].endswith("(1/2)") and b["title"].endswith("(2/2)")
+    assert 1 < len(a["chapters"]) <= MAX_CHAPTERS and b["chapters"] and b["chapters"][0].first == 0
+    assert all(c.last < 100 for c in b["chapters"])

@@ -51,6 +51,9 @@ No model involved; it runs on its own queue, so it never waits behind a translat
 - **Black/white (.xtc) by default.** The firmware mallocs one whole page each turn: 48 KB for XTC, 96 KB for
   4-grey XTCH. A 70 MB XTCH book gave "Memory error" on the X4 (no 96 KB block left in a fragmented heap); XTC
   halves both the request and the file. Strokes are thresholded at 170/255 so small text stays whole.
+- **Long books are split** into files of at most 600 device pages (`PDF_PART_PAGES`): the firmware also keeps the
+  whole page table in RAM (16 bytes a page), so a 9,372-page file wants ~150 KB of its ~380 KB heap. Each part
+  is titled "Name (2/16)" and keeps the chapters inside it; download all as one zip or part by part.
 - Preview any device page in the browser and convert again with other options from the same upload.
 - Format written from the firmware's own parser (`lib/Xtc`): header 56 bytes, title/author, 96-byte chapter
   records, page table, XTG/XTH pages (XTH: two bit planes, column-major from the right edge; 0 white, 1 dark grey,
@@ -83,6 +86,7 @@ a 160k-character book takes ~1 h, a 800k-character novel ~5 h.
 | `TRANSLATE_PARALLEL` | `4` | chunks in flight (= llama-server `parallel`) |
 | `DISCORD_WEBHOOK_URL` | (empty = off) | notifications |
 | `MAX_PDF_MB` | `300` | PDF upload limit (streamed to disk) |
+| `PDF_PART_PAGES` | `600` | X4 device pages per output file |
 | `PUBLIC_URL` | (empty) | e.g. `http://epub.lan`, makes the Discord titles links to the job |
 
 ## Run locally
