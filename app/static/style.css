@@ -356,3 +356,11 @@ td.del-cell button:hover { color: var(--bad); }
   .modes a { flex: 1; text-align: center; }
   .top-inner { flex-wrap: wrap; }
 }
+
+.x4-box { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 12px; padding: 12px; margin: 4px 0 14px; }
+.x4-box .row { flex-wrap: nowrap; }
+.x4-box input { flex: 1 1 auto; min-width: 0; }
+.x4-box .hint { margin: 10px 0 0; }
+.x4-box code { word-break: break-all; }
+.x4-line { margin-bottom: 8px; }
+.ok-text { color: var(--ok); }

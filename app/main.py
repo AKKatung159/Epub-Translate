@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from . import llm, pdfworker, worker
 from .config import settings
 from .epub import TAG_RE, Book, check_tags
+from .names import clean_name
 from .store import GLOSSARY_COLS, job_dir, store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -97,7 +98,7 @@ async def create_job(file: UploadFile = File(...), bilingual: bool = Form(False)
         raise HTTPException(400, f"อ่านไฟล์ EPUB ไม่ได้: {e}") from e
     if not segs:
         raise HTTPException(400, "ไม่พบข้อความภาษาอังกฤษในไฟล์นี้")
-    name = re.sub(r"\.epub$", "", file.filename or "book", flags=re.I)
+    name = clean_name(file.filename or "book")
     prev = store.job(series_from) if series_from else None
     if prev and not style_notes.strip():
         style_notes = prev["options"].get("style_notes", "")     # the series keeps its style rules
@@ -135,6 +136,7 @@ def delete_job(jid: str):
 
 
 class Options(BaseModel):
+    name: str | None = None
     bilingual: bool | None = None
     style_notes: str | None = None
     book_profile: str | None = None
@@ -144,6 +146,9 @@ class Options(BaseModel):
 def patch_job(jid: str, o: Options):
     _job_or_404(jid)
     changes = {k: v for k, v in o.model_dump().items() if v is not None}
+    name = (changes.pop("name", None) or "").strip()
+    if name:
+        store.x("UPDATE jobs SET name=? WHERE id=?", (name[:200], jid))
     if "book_profile" in changes:
         changes["book_profile_edited"] = True        # "make the glossary again" keeps the user's profile
     store.update_options(jid, **changes)
@@ -302,18 +307,22 @@ def retranslate(jid: str, sid: int):
 
 # download -------------------------------------------------------------------------------------------------
 
+def thai_epub(j: dict, bilingual: bool | None = None) -> tuple[bytes, str]:
+    """The translated book (whatever is done so far) and a readable file name: "Name (ไทย).epub"."""
+    book = Book.load((job_dir(j["id"]) / "source.epub").read_bytes())
+    tr = {(r["doc"], r["path"]): r["out"] for r in store.q(
+        "SELECT doc, path, out FROM segments WHERE job_id=? AND status IN ('done','flagged') AND out IS NOT NULL",
+        (j["id"],))}
+    bi = j["options"].get("bilingual", False) if bilingual is None else bilingual
+    tag = "ไทย-อังกฤษ" if bi else "ไทย"
+    if j["status"] != "done":
+        tag += " บางส่วน"
+    return book.build(tr, bilingual=bi), f"{_safe_name(j['name'])} ({tag}).epub"
+
+
 @app.get("/api/jobs/{jid}/download")
 def download(jid: str, bilingual: bool | None = None):
-    j = _job_or_404(jid)
-    book = Book.load((job_dir(jid) / "source.epub").read_bytes())
-    tr = {(r["doc"], r["path"]): r["out"] for r in store.q(
-        "SELECT doc, path, out FROM segments WHERE job_id=? AND status IN ('done','flagged') AND out IS NOT NULL", (jid,))}
-    bi = j["options"].get("bilingual", False) if bilingual is None else bilingual
-    data = book.build(tr, bilingual=bi)
-    suffix = "_th_bilingual" if bi else "_th"
-    if j["status"] != "done":
-        suffix += "_partial"
-    fname = re.sub(r"[\\/:*?\"<>|]+", "_", j["name"])[:120] + suffix + ".epub"
+    data, fname = thai_epub(_job_or_404(jid), bilingual)
     ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
     return Response(data, media_type="application/epub+zip", headers={
         "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
@@ -374,7 +383,7 @@ def create_pdf(file: UploadFile = File(...), mode: str = Form("auto"), rotate: s
                depth: int = Form(1), trim: bool = Form(True)):
     import pypdfium2 as pdfium
     opts = PdfOptions(mode=mode, rotate=rotate, depth=depth, trim=trim).checked()
-    name = re.sub(r"\.pdf$", "", file.filename or "document", flags=re.I)
+    name = clean_name(file.filename or "document")
     tmp = settings.data_dir / "pdf" / f"upload-{time.time_ns()}.pdf"
     tmp.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -405,6 +414,18 @@ def reconvert_pdf(pid: str, o: PdfOptions):
     store.x("UPDATE pdfs SET options=?, status='queued', message='รอคิว' WHERE id=?",
             (json.dumps(o.checked()), pid))
     pdfworker.wake.set()
+    return _pdf_summary(pdfworker.row(pid))
+
+
+class PdfPatch(BaseModel):
+    name: str
+
+
+@app.patch("/api/pdf/{pid}")
+def rename_pdf(pid: str, p: PdfPatch):
+    _pdf_or_404(pid)
+    if p.name.strip():
+        store.x("UPDATE pdfs SET name=? WHERE id=?", (p.name.strip()[:200], pid))
     return _pdf_summary(pdfworker.row(pid))
 
 
@@ -476,6 +497,67 @@ def preview_pdf(pid: str, n: int):
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
     return Response(buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+# send to the X4 ---------------------------------------------------------------------------------------------
+
+class X4Address(BaseModel):
+    address: str
+
+
+@app.get("/api/x4")
+def x4_status():
+    from . import x4
+    return {**x4.status(), "sends": x4.sends}
+
+
+@app.get("/api/x4/sends")
+def x4_sends():
+    from . import x4
+    return x4.sends
+
+
+@app.put("/api/x4")
+def x4_set(a: X4Address):
+    from . import x4
+    x4.set_address(a.address)
+    return x4.status()
+
+
+@app.post("/api/x4/send/{kind}/{oid}")
+def x4_send(kind: str, oid: str):
+    """kind "pdf": all parts of a PDF conversion; kind "book": the Thai EPUB of a translation job."""
+    from . import x4
+    if kind == "pdf":
+        d = _pdf_or_404(oid)
+        files = pdfworker.parts(d)
+        if d["status"] != "done" or not files:
+            raise HTTPException(409, "ยังแปลงไม่เสร็จ")
+        base = _safe_name(d["name"])
+        named = [(f"{base}{f.suffix}" if len(files) == 1 else f"{base} {k + 1:02d}{f.suffix}", f)
+                 for k, f in enumerate(files)]
+    elif kind == "book":
+        data, fname = thai_epub(_job_or_404(oid))
+        named = [(fname, data)]
+    else:
+        raise HTTPException(404)
+    return x4.start(f"{kind}:{oid}", named)
+
+
+# OPDS (e-readers on the LAN) ---------------------------------------------------------------------------------
+
+@app.get("/opds")
+def opds_feed():
+    from . import opds
+    return Response(opds.feed(), media_type="application/atom+xml;profile=opds-catalog;charset=utf-8")
+
+
+@app.get("/opds/books/{jid}.epub")
+def opds_book(jid: str):
+    data, fname = thai_epub(_job_or_404(jid))
+    ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
+    return Response(data, media_type="application/epub+zip", headers={
+        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
 
 
 def _versioned_index() -> str:

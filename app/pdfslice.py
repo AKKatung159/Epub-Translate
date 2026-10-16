@@ -19,7 +19,7 @@ import numpy as np
 import pypdfium2 as pdfium
 from PIL import Image
 
-from .xtc import H, W, Chapter, Writer
+from .xtc import H, W, Chapter, Writer, picture_tiles
 
 log = logging.getLogger("pdfslice")
 
@@ -38,6 +38,7 @@ class Options:
     margin: int = 6             # px of white kept around the cropped content
     trim: bool = True           # drop running headers / page numbers (a lone short line at the very top/bottom)
     per_part: int = 600         # device pages per file; the X4 keeps a 16-byte entry per page in RAM
+    cover: bool = True          # a picture on PDF page 1 becomes a whole upright page (the X4's home thumbnail)
 
 
 def ink_box(gray: np.ndarray) -> tuple[int, int, int, int] | None:
@@ -130,6 +131,11 @@ def page_content(page: pdfium.PdfPage, o: Options) -> Image.Image | None:
     m = o.margin * 2
     l, t, r, b = box
     return gray.crop((max(0, l - m), max(0, t - m), min(gray.width, r + m), min(gray.height, b + m)))
+
+
+def is_cover(content: Image.Image) -> bool:
+    """A page that is mostly picture (a cover, a full-page illustration), not a page of text."""
+    return float(picture_tiles(np.asarray(whole_page(content))).mean()) >= 0.25
 
 
 def whole_page(content: Image.Image) -> Image.Image:
@@ -233,6 +239,12 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
                 content = page_content(page, o)
             finally:
                 page.close()
+            if i == 0 and o.mode != "page" and o.cover and content is not None and is_cover(content):
+                first_of.append(len(writer))
+                writer.add(np.asarray(whole_page(content), np.uint8))   # cut into strips, a cover is a mess
+                if progress:
+                    progress(i + 1, n, len(writer))
+                continue
             if o.mode == "page":
                 first_of.append(len(writer))
                 if content is not None:

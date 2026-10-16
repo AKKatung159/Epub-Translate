@@ -108,3 +108,25 @@ def test_default_is_black_white_and_chapters_stay_few(tmp_path):
     assert a["title"].endswith("(1/2)") and b["title"].endswith("(2/2)")
     assert 1 < len(a["chapters"]) <= MAX_CHAPTERS and b["chapters"] and b["chapters"][0].first == 0
     assert all(c.last < 100 for c in b["chapters"])
+
+
+def test_pictures_are_dithered_text_stays_sharp_and_a_cover_page_stays_whole(tmp_path):
+    from app.xtc import picture_tiles
+    yy, xx = np.mgrid[0:H, 0:W]
+    photo = ((np.sin(xx / 30) + np.cos(yy / 45)) * 70 + 128).clip(0, 255).astype(np.uint8)
+    text = np.asarray(Image.fromarray(lines_image(30, header=False)).resize((W, H)))
+    assert picture_tiles(text).mean() == 0                         # text never dithered
+    assert picture_tiles(photo).mean() > 0.9
+    page = decode_page(encode_page(photo, 1), 1)
+    grey = photo[200:216, 200:216].mean()
+    # dithering: a 16x16 patch keeps about the same share of black as its grey level asks for
+    assert abs((page[200:216, 200:216] == 255).mean() * 255 - grey) < 40
+    cover = Image.fromarray(photo).convert("RGB").resize((600, 900))
+    body = Image.fromarray(lines_image(45)).convert("RGB")
+    pdf = tmp_path / "book.pdf"
+    cover.save(pdf, save_all=True, append_images=[body, body], resolution=150)
+    out = tmp_path / "book.xtc"
+    convert(pdf, out, Options())
+    info = read_info(out)
+    first = decode_page(info["raw"][info["pages"][0][0]:][:info["pages"][0][1]], 1)
+    assert picture_tiles(np.where(first > 0, 170, 60).astype(np.uint8)).mean() > 0.2   # page 1 = the cover, upright

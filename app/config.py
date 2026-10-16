@@ -18,6 +18,7 @@ class Settings:
     max_pdf_mb: int = int(os.environ.get("MAX_PDF_MB", "300"))
     pdf_part_pages: int = int(os.environ.get("PDF_PART_PAGES", "600"))   # X4 device pages per output file
     discord_webhook_url: str = os.environ.get("DISCORD_WEBHOOK_URL", "")       # empty = no notifications
+    x4_address: str = os.environ.get("X4_ADDRESS", "")                       # Xteink X4 IP for "send to X4"
     public_url: str = os.environ.get("PUBLIC_URL", "")                         # for links in notifications
 
 

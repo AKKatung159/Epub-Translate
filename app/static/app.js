@@ -185,6 +185,7 @@ async function refreshJob() {
     j.status !== "done" && j.docs_ready ? stat("อ่านต่อเนื่องได้แล้ว", `${j.docs_ready}/${j.docs_total} บท · ถึง ${esc(j.readable_until)}`, "ok") : "",
   ].filter(Boolean).join("");
   $("#flag-count").textContent = j.flagged || "";
+  await refreshSends();
   renderActions(j);
   $("#g-start").classList.toggle("hidden", j.status !== "review");
   const imp = $("#g-import");
@@ -201,7 +202,7 @@ async function refreshJob() {
 function renderActions(j) {
   const a = [], more = [];
   // main actions (bottom bar on phones) vs occasional ones (stay in the card)
-  const btn = (label, fn, cls = "") => (["dl-bi", "retry-flagged", "cancel"].includes(fn) ? more : a)
+  const btn = (label, fn, cls = "") => (["dl-bi", "retry-flagged", "cancel", "x4", "rename"].includes(fn) ? more : a)
     .push(`<button class="${cls}" data-fn="${fn}">${label}</button>`);
   // primary action first: it gets the most room in the bottom bar on phones
   if (j.status === "review") btn("เริ่มแปล", "start", "primary");
@@ -212,8 +213,10 @@ function renderActions(j) {
   if (j.done + j.flagged > 0) {
     if (j.status !== "done") btn(`${icon("download")}อ่านเท่าที่แปลแล้ว`, "dl");
     btn(`${icon("download")}สองภาษา`, "dl-bi");
+    btn(x4Label(`book:${j.id}`), "x4");
   }
   if (j.flagged && ["done", "paused", "review", "error"].includes(j.status)) btn(`แปลใหม่ ${j.flagged} ย่อหน้า`, "retry-flagged");
+  btn("เปลี่ยนชื่อ", "rename");
   if (!["done", "cancelled"].includes(j.status)) btn("ยกเลิก", "cancel", "danger");
   $("#job-actions").innerHTML = a.join("");
   $("#job-more").innerHTML = more.join("");
@@ -222,6 +225,8 @@ function renderActions(j) {
 
 async function action(fn) {
   try {
+    if (fn === "x4") return sendX4("book", current);
+    if (fn === "rename") return renameJob();
     if (fn === "dl" || fn === "dl-bi") {
       location.href = `/api/jobs/${current}/download${fn === "dl-bi" ? "?bilingual=true" : "?bilingual=false"}`;
       return;
@@ -433,7 +438,7 @@ document.querySelectorAll(".modes a").forEach((a) => (a.onclick = (e) => {
   e.preventDefault();
   current = null;
   document.title = "แปลหนังสือ EPUB";
-  if (a.dataset.view === "pdf") { location.hash = "pdf"; setView("pdf"); pdfSig = ""; loadPdfs(); }
+  if (a.dataset.view === "pdf") { location.hash = "pdf"; setView("pdf"); pdfSig = ""; loadPdfs(); checkX4(); }
   else { location.hash = ""; setView("books"); $("#job-view").classList.add("hidden"); $("#list-view").classList.remove("hidden"); loadJobs(); }
 }));
 
@@ -488,7 +493,8 @@ const optSel = (cls, val, opts) => `<select class="${cls}">${opts.map(([v, l]) =
 
 async function loadPdfs() {
   const items = await api("/api/pdf");
-  const sig = JSON.stringify([items, pdfOpen]);
+  await refreshSends();
+  const sig = JSON.stringify([items, pdfOpen, x4Sends]);
   if (sig === pdfSig) return;                       // nothing changed: keep the preview image as it is
   if (document.activeElement?.closest?.("#pdfs select")) return;
   pdfSig = sig;
@@ -532,6 +538,8 @@ async function loadPdfs() {
         ${d.status === "done" ? `<button class="primary" data-a="dl">${icon("download")}${nparts > 1 ? "ดาวน์โหลดทั้งหมด (.zip)" : "ดาวน์โหลด"}</button>
           <button data-a="preview">${open ? "ซ่อนตัวอย่าง" : "ดูตัวอย่าง / ปรับ"}</button>` : ""}
         ${d.status === "error" ? `<button data-a="retry">ลองใหม่</button>` : ""}
+        ${d.status === "done" ? `<button data-a="x4">${x4Label(`pdf:${d.id}`)}</button>` : ""}
+        <button data-a="rename">เปลี่ยนชื่อ</button>
         <button class="danger" data-a="del">ลบ</button>
       </div>
       ${partList}
@@ -550,6 +558,13 @@ async function loadPdfs() {
 async function pdfAction(d, a, el) {
   try {
     if (a === "dl") { location.href = `/api/pdf/${d.id}/download`; return; }
+    if (a === "x4") return sendX4("pdf", d.id);
+    if (a === "rename") {
+      const name = prompt("ชื่อไฟล์บน X4", d.name);
+      if (!name || name.trim() === d.name) return;
+      await api(`/api/pdf/${d.id}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
+      toast("เปลี่ยนชื่อแล้ว"); pdfSig = ""; return loadPdfs();
+    }
     if (a === "preview") { pdfOpen = pdfOpen?.id === d.id ? null : { id: d.id, n: 0 }; return loadPdfs(); }
     if (a === "del") {
       if (!confirm(`ลบ "${d.name}"?`)) return;
@@ -569,9 +584,63 @@ async function pdfAction(d, a, el) {
   } catch (e) { toast(e.message, "err"); }
 }
 
+// ------------------------------------------------------------------------------------------- send to X4
+let x4Sends = {};
+async function refreshSends() { try { x4Sends = await api("/api/x4/sends"); } catch { x4Sends = {}; } }
+function x4Label(key) {
+  const s = x4Sends[key];
+  if (s?.state === "sending") return `ส่งอยู่ ${s.total ? Math.round(100 * s.sent / s.total) : 0}%`;
+  if (s?.state === "done") return "ส่งแล้ว ✓ ส่งอีกครั้ง";
+  if (s?.state === "error") return "ส่งไม่สำเร็จ ลองใหม่";
+  return "ส่งเข้า X4";
+}
+async function sendX4(kind, id) {
+  try {
+    const st = await api("/api/x4");
+    if (!st.ok) { toast(st.error || "ต่อ X4 ไม่ได้", "err"); return; }
+    await api(`/api/x4/send/${kind}/${id}`, { method: "POST" });
+    toast("กำลังส่งเข้า X4… อย่าเพิ่งปิดหน้า File Transfer");
+    watchSend(`${kind}:${id}`);
+  } catch (e) { toast(e.message, "err"); }
+}
+function watchSend(key) {
+  const t = setInterval(async () => {
+    await refreshSends();
+    const s = x4Sends[key];
+    if (view === "pdf") { pdfSig = ""; loadPdfs(); } else if (current) refreshJob();
+    if (!s || s.state !== "sending") {
+      clearInterval(t);
+      if (s?.state === "done") toast(s.message);
+      if (s?.state === "error") toast(s.message, "err");
+    }
+  }, 1500);
+}
+async function renameJob() {
+  const name = prompt("ชื่อหนังสือ", currentJob?.name || "");
+  if (!name || name.trim() === currentJob?.name) return;
+  await api(`/api/jobs/${current}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
+  toast("เปลี่ยนชื่อแล้ว"); refreshJob();
+}
+async function checkX4() {
+  const el = $("#x4-state");
+  el.textContent = "กำลังเช็ก…"; el.className = "muted small";
+  try {
+    const s = await api("/api/x4");
+    if (document.activeElement !== $("#x4-addr")) $("#x4-addr").value = s.address || "";
+    el.textContent = s.ok ? `ต่อได้ · ${s.version ? "CrossPoint " + s.version : ""} · Wi-Fi ${s.rssi ?? "?"} dBm` : (s.error || "ต่อไม่ได้");
+    el.className = "small " + (s.ok ? "ok-text" : "muted");
+  } catch (e) { el.textContent = e.message; }
+}
+$("#x4-check").onclick = async () => {
+  const addr = $("#x4-addr").value.trim();
+  if (addr) await api("/api/x4", { method: "PUT", body: JSON.stringify({ address: addr }) });
+  checkX4();
+};
+$("#opds-url").textContent = `${location.protocol}//${location.host}/opds`;
+
 // ------------------------------------------------------------------------------------------- loop
 health(); loadJobs();
-if (location.hash === "#pdf") { setView("pdf"); loadPdfs(); }
+if (location.hash === "#pdf") { setView("pdf"); loadPdfs(); checkX4(); }
 else if (location.hash.length > 1) openJob(location.hash.slice(1));
 else setView("books");
 setInterval(() => (current ? refreshJob() : view === "pdf" ? loadPdfs() : loadJobs()).catch(() => {}), 2000);

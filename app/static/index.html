@@ -112,8 +112,15 @@
 
     <div class="card jobs-card">
       <div class="card-head"><h2>ไฟล์สำหรับ X4</h2></div>
-      <p class="hint">ได้ไฟล์ .xtch (หรือ .xtc ถ้าเลือกขาวดำ) ส่งเข้าเครื่องผ่าน File Transfer (Wi-Fi) หรือ SD card ·
-        สารบัญของ PDF กลายเป็นรายการบทในเมนูของเครื่อง</p>
+      <div class="x4-box" id="x4-box">
+        <div class="x4-line"><b>X4</b> <span id="x4-state" class="muted small">ยังไม่ได้เช็ก</span></div>
+        <div class="row">
+          <input id="x4-addr" placeholder="IP ของ X4 เช่น 192.168.0.224" inputmode="decimal">
+          <button id="x4-check" class="ghost">เช็ก</button>
+        </div>
+        <p class="hint">กด "ส่งเข้า X4" ได้เมื่อเปิดหน้า File Transfer บนเครื่องค้างไว้ ไฟล์ไปอยู่ในโฟลเดอร์ Books ·
+          หนังสือแปลไทย (EPUB) โหลดจากเครื่องได้เองผ่าน OPDS: บน X4 ตั้ง OPDS เป็น <code id="opds-url"></code></p>
+      </div>
       <div id="pdfs"></div>
     </div>
   </section>

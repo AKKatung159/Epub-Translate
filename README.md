@@ -61,6 +61,23 @@ No model involved; it runs on its own queue, so it never waits behind a translat
 
 Speed: ~25 PDF pages per second (measured on the ROG Ally; the apps VM may be slower); an A5 novel page → ~2.4 device pages (~48 KB each in black/white, ~95 KB in 4 greys).
 
+## Getting books onto the Xteink X4
+
+- **OPDS** at `/opds`: every translated book (finished or partly done) as an EPUB. On the X4 (CrossPoint):
+  Settings → OPDS → add `http://epub.lan/opds` (or `http://<apps VM IP>:8770/opds`), then browse and download
+  from the device. CrossPoint follows only `application/epub+zip` acquisition links, so `.xtc` files are not listed.
+- **Send to X4** (button on a PDF conversion or a book): with the X4 on its File Transfer screen, the server
+  uploads the file(s) to `/Books` through the device's own web server. The container cannot resolve
+  `crosspoint.local`, so set the X4's IP in the PDF menu (or `X4_ADDRESS`) and reserve it in the router.
+- **Readable names**: download-site tags and underscores are removed (`_OceanofPDF.com_The_Goblin_Emperor_-_...`
+  → `The Goblin Emperor - ...`); rename books and PDFs in the UI. Files are named "Name (ไทย).epub" /
+  "Name.xtc" / "Name 01.xtc".
+- **Pictures in black/white files** are dithered (8×8 ordered dither) so they read as grey; text stays a sharp
+  threshold. Regions of dense, mostly mid-grey 16-px tiles are pictures; text tiles are mostly white paper. A
+  picture on PDF page 1 becomes a whole upright cover page (the X4 also uses page 1 for its home-screen thumbnail).
+- Firmware checked: CrossPoint 1.0.0 (Thai fork) and CrossPoint Halo 2 v2.2.15 (kocha01/crosspoint-halo2-custom)
+  read XTC the same way: one whole-page malloc per turn and the whole page table in RAM.
+
 ## Models
 
 | Use | Model | Default name |
@@ -87,6 +104,7 @@ a 160k-character book takes ~1 h, a 800k-character novel ~5 h.
 | `DISCORD_WEBHOOK_URL` | (empty = off) | notifications |
 | `MAX_PDF_MB` | `300` | PDF upload limit (streamed to disk) |
 | `PDF_PART_PAGES` | `600` | X4 device pages per output file |
+| `X4_ADDRESS` | (empty) | Xteink X4 IP for "send to X4" (can be set in the UI) |
 | `PUBLIC_URL` | (empty) | e.g. `http://epub.lan`, makes the Discord titles links to the job |
 
 ## Run locally

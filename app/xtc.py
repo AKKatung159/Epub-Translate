@@ -47,12 +47,72 @@ def levels4(gray: np.ndarray) -> np.ndarray:
     return out
 
 
+# 8x8 Bayer matrix: an ordered dither keeps tiles independent, so dithered pictures sit next to sharp text
+_BAYER = np.array([[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26],
+                   [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
+                   [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
+                   [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]], np.float32)
+_BAYER_T = np.tile((_BAYER + 0.5) * 4, (H // 8, W // 8))          # thresholds 2..254 over the page
+TILE = 16
+TEXT_THRESHOLD = 170        # not 128: anti-aliased strokes of small text stay whole instead of breaking up
+
+
+def picture_tiles(gray: np.ndarray) -> np.ndarray:
+    """Per 16x16 tile: True inside a picture (photo, illustration, cover).
+
+    Dense tiles (>= 60 % not white) form regions (4-connected). A region is a picture when at least a third of its tiles are
+    mostly mid-grey; then all of it is dithered, its near-black and near-white parts too (deciding tile by tile
+    left solid blobs there). Text is black on white with thin anti-aliased edges: its tiles are never mostly
+    mid-grey, so a paragraph stays sharp even right next to a picture."""
+    h, w = gray.shape
+    t = gray.reshape(h // TILE, TILE, w // TILE, TILE)
+    mid = (((t > 40) & (t < 215)).mean(axis=(1, 3))) >= 0.5
+    inked = (t < 215).mean(axis=(1, 3)) >= 0.6       # dense: text tiles are mostly white paper, pictures are not
+    rows, cols = inked.shape
+    out = np.zeros_like(inked)
+    seen = np.zeros_like(inked)
+    for r0 in range(rows):
+        for c0 in range(cols):
+            if not inked[r0, c0] or seen[r0, c0]:
+                continue
+            region, stack = [], [(r0, c0)]
+            seen[r0, c0] = True
+            while stack:
+                r, c = stack.pop()
+                region.append((r, c))
+                for rr, cc in ((r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)):
+                    if 0 <= rr < rows and 0 <= cc < cols and inked[rr, cc] and not seen[rr, cc]:
+                        seen[rr, cc] = True
+                        stack.append((rr, cc))
+            if sum(mid[r, c] for r, c in region) >= max(2, len(region) / 3):
+                for r, c in region:
+                    out[r, c] = True
+    # pictures fade out into light areas; grow into neighbouring tiles without dark strokes (so never into text)
+    light = t.min(axis=(1, 3)) > 120
+    for _ in range(6):
+        grow = np.zeros_like(out)
+        grow[1:] |= out[:-1]
+        grow[:-1] |= out[1:]
+        grow[:, 1:] |= out[:, :-1]
+        grow[:, :-1] |= out[:, 1:]
+        grow &= light & ~out
+        if not grow.any():
+            break
+        out |= grow
+    return out
+
+
+def to_bw(gray: np.ndarray) -> np.ndarray:
+    """1-bit page (True = white): text thresholded sharp, pictures dithered so they read as grey."""
+    photo = np.kron(picture_tiles(gray), np.ones((TILE, TILE), bool))
+    return gray >= np.where(photo, _BAYER_T, TEXT_THRESHOLD)
+
+
 def encode_page(gray: np.ndarray, depth: int) -> bytes:
     """gray: uint8 array (800, 480), 0 = black. Returns XTG/XTH page header + bitmap."""
     assert gray.shape == (H, W), gray.shape
     if depth == 1:
-        # 1 = white. 170, not 128: anti-aliased strokes of small text stay whole instead of breaking up
-        bitmap = np.packbits(gray >= 170, axis=1).tobytes()
+        bitmap = np.packbits(to_bw(gray), axis=1).tobytes()          # 1 = white
         magic = XTG
     else:
         v = levels4(gray)

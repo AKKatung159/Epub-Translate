@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS glossary (
 CREATE TABLE IF NOT EXISTS docs (
   job_id TEXT, doc TEXT, ord INTEGER, title TEXT, PRIMARY KEY (job_id, doc)
 );
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS pdfs (
   id TEXT PRIMARY KEY, name TEXT, created REAL, status TEXT, message TEXT DEFAULT '',
   options TEXT DEFAULT '{}', pdf_pages INTEGER DEFAULT 0, done_pages INTEGER DEFAULT 0,
@@ -61,6 +62,14 @@ class Store:
             if col not in have:
                 self.db.execute(f"ALTER TABLE glossary ADD COLUMN {col} {decl}")
         self.lock = threading.RLock()
+        self._clean_names()
+
+    def _clean_names(self) -> None:
+        from .names import clean_name
+        for table in ("jobs", "pdfs"):
+            for r in self.db.execute(f"SELECT id, name FROM {table}").fetchall():
+                if r["name"] and clean_name(r["name"]) != r["name"] and "_" in r["name"]:
+                    self.db.execute(f"UPDATE {table} SET name=? WHERE id=?", (clean_name(r["name"]), r["id"]))
 
     def q(self, sql: str, args=()) -> list[sqlite3.Row]:
         with self.lock:
