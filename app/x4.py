@@ -126,7 +126,8 @@ def _run(job: dict) -> None:
         s = status()
         if not s["ok"]:
             raise RuntimeError(s.get("error") or "X4 ไม่ตอบ")
-        with httpx.Client(timeout=httpx.Timeout(120, connect=6)) as c:
+        # the X4 answers only after it has written the whole file to its SD card: allow minutes per file
+        with httpx.Client(timeout=httpx.Timeout(900, connect=10)) as c:
             parent = ROOT
             for part in [p for p in job["folder"].split("/") if p]:      # "Sherlock Holmes/Book" -> both levels
                 if part not in _listing(c, base, parent):
@@ -144,20 +145,31 @@ def _run(job: dict) -> None:
                     st["done_files"] += 1
                     continue
                 st["message"] = f"กำลังส่ง {name}" + (f" ({k + 1}/{n})" if n > 1 else "")
+                before = st["sent"]
+                for attempt in range(3):                   # Wi-Fi hiccup or a busy X4: same file again
+                    st["sent"] = before
 
-                def bump(b):
-                    st["sent"] += b
-                fh = open(src, "rb") if isinstance(src, Path) else None
-                try:
-                    body = _Counting(fh, bump) if fh else src
-                    r = c.post(f"{base}/upload", params={"path": target}, files={"file": (name, body)})
-                finally:
-                    if fh:
-                        fh.close()
+                    def bump(b):
+                        st["sent"] += b
+                    fh = open(src, "rb") if isinstance(src, Path) else None
+                    try:
+                        body = _Counting(fh, bump) if fh else src
+                        r = c.post(f"{base}/upload", params={"path": target}, files={"file": (name, body)})
+                        if r.status_code == 200:
+                            break
+                        err = f"X4 ตอบ {r.status_code}: {r.text[:120]}"
+                    except httpx.HTTPError as e:
+                        err = f"{type(e).__name__} ({name})"
+                    finally:
+                        if fh:
+                            fh.close()
+                    log.warning("send %s try %d: %s", name, attempt + 1, err)
+                    st["message"] = f"ลองส่ง {name} ใหม่ ({attempt + 2}/3)"
+                    time.sleep(15)
+                else:
+                    raise RuntimeError(err)
                 if isinstance(src, bytes):
                     bump(size)
-                if r.status_code != 200:
-                    raise RuntimeError(f"X4 ตอบ {r.status_code}: {r.text[:120]}")
                 st["done_files"] += 1
         skipped = f" (มีอยู่แล้ว {st['skipped']} ไฟล์ ข้ามไป)" if st["skipped"] else ""
         st.update(state="done", sent=st["total"], message=f"ส่งเข้า X4 แล้ว: {target}{skipped}")
