@@ -505,7 +505,7 @@ async function loadPdfs() {
   }
   box.innerHTML = items.map((d) => {
     const o = d.options, pct = d.pdf_pages ? Math.round(100 * d.done_pages / d.pdf_pages) : 0;
-    const mb = d.out_size ? ` · ${(d.out_size / 1048576).toFixed(1)} MB` : "";
+    const mb = (d.out_size ? ` · ${(d.out_size / 1048576).toFixed(1)} MB` : "") + (o.folder ? ` · 📁 ${o.folder}` : "");
     const nparts = d.parts?.length || 0;
     const meta = d.status === "done" ? `${d.pdf_pages} หน้า PDF → ${d.out_pages} หน้าจอ${nparts > 1 ? ` (${nparts} ไฟล์)` : ""}${mb} · ${MODE_LABEL[o.mode] || o.mode}${o.depth == 2 ? " · เทา 4 ระดับ" : " · ขาวดำ"}`
       : `${d.pdf_pages} หน้า PDF · ${d.message || ""}`;
@@ -539,7 +539,7 @@ async function loadPdfs() {
           <button data-a="preview">${open ? "ซ่อนตัวอย่าง" : "ดูตัวอย่าง / ปรับ"}</button>` : ""}
         ${d.status === "error" ? `<button data-a="retry">ลองใหม่</button>` : ""}
         ${d.status === "done" ? `<button data-a="x4">${x4Label(`pdf:${d.id}`)}</button>` : ""}
-        <button data-a="rename">เปลี่ยนชื่อ</button>
+        <button data-a="rename">ชื่อ / โฟลเดอร์</button>
         <button class="danger" data-a="del">ลบ</button>
       </div>
       ${partList}
@@ -560,10 +560,12 @@ async function pdfAction(d, a, el) {
     if (a === "dl") { location.href = `/api/pdf/${d.id}/download`; return; }
     if (a === "x4") return sendX4("pdf", d.id);
     if (a === "rename") {
-      const name = prompt("ชื่อไฟล์บน X4", d.name);
-      if (!name || name.trim() === d.name) return;
-      await api(`/api/pdf/${d.id}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
-      toast("เปลี่ยนชื่อแล้ว"); pdfSig = ""; return loadPdfs();
+      const name = prompt("ชื่อไฟล์บน X4 (ใส่เลขลำดับข้างหน้าเพื่อเรียง เช่น 01 แค้นพยาบาท)", d.name);
+      if (name === null) return;
+      const folder = prompt("โฟลเดอร์ใน Books สำหรับหนังสือชุด (เช่น Sherlock Holmes) · เว้นว่าง = Books", d.options.folder || "");
+      if (folder === null) return;
+      await api(`/api/pdf/${d.id}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() || d.name, folder }) });
+      toast("บันทึกแล้ว"); pdfSig = ""; return loadPdfs();
     }
     if (a === "preview") { pdfOpen = pdfOpen?.id === d.id ? null : { id: d.id, n: 0 }; return loadPdfs(); }
     if (a === "del") {

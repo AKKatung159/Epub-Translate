@@ -419,14 +419,18 @@ def reconvert_pdf(pid: str, o: PdfOptions):
 
 
 class PdfPatch(BaseModel):
-    name: str
+    name: str | None = None
+    folder: str | None = None          # series folder on the X4 under /Books ("" = /Books itself)
 
 
 @app.patch("/api/pdf/{pid}")
 def rename_pdf(pid: str, p: PdfPatch):
-    _pdf_or_404(pid)
-    if p.name.strip():
+    d = _pdf_or_404(pid)
+    if p.name and p.name.strip():
         store.x("UPDATE pdfs SET name=? WHERE id=?", (p.name.strip()[:200], pid))
+    if p.folder is not None:
+        folder = _safe_name(p.folder.strip().strip("/"))[:80]
+        store.x("UPDATE pdfs SET options=? WHERE id=?", (json.dumps({**d["options"], "folder": folder}), pid))
     return _pdf_summary(pdfworker.row(pid))
 
 

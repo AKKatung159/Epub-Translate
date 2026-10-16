@@ -61,10 +61,13 @@ def device_files(d: dict, base: str) -> tuple[str, list[tuple[str, Path]]]:
     """(folder under /Books or "", [(file name, path)]) as the files should appear on the X4.
 
     One file: "/Books/<name>.xtc". Several: their own folder "/Books/<name>/" with "01 บทที่ 1-93.xtc",
-    "02 บทที่ 94-187.xtc"...: the number first, because the X4's file list cuts long names."""
+    "02 บทที่ 94-187.xtc"...: the number first, because the X4's file list cuts long names.
+    A series folder (option "folder", e.g. "Sherlock Holmes") goes in front: "/Books/Sherlock Holmes/01 ...xtc"."""
     files = parts(d)
+    series = (d["options"].get("folder") or "").strip().strip("/")
     if len(files) == 1:
-        return "", [(f"{base}{files[0].suffix}", files[0])]
+        return series, [(f"{base}{files[0].suffix}", files[0])]
+    base = f"{series}/{base}" if series else base
     labels = {}
     index = pdf_dir(d["id"]) / "book.parts.json"
     if index.exists():

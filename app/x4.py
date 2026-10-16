@@ -127,10 +127,13 @@ def _run(job: dict) -> None:
         if not s["ok"]:
             raise RuntimeError(s.get("error") or "X4 ไม่ตอบ")
         with httpx.Client(timeout=httpx.Timeout(120, connect=6)) as c:
-            if job["folder"] and job["folder"] not in _listing(c, base, ROOT):
-                r = c.post(f"{base}/mkdir", files={"name": (None, job["folder"]), "path": (None, ROOT)})
-                if r.status_code != 200:
-                    raise RuntimeError(f"สร้างโฟลเดอร์ไม่ได้: {r.text[:120]}")
+            parent = ROOT
+            for part in [p for p in job["folder"].split("/") if p]:      # "Sherlock Holmes/Book" -> both levels
+                if part not in _listing(c, base, parent):
+                    r = c.post(f"{base}/mkdir", files={"name": (None, part), "path": (None, parent)})
+                    if r.status_code != 200:
+                        raise RuntimeError(f"สร้างโฟลเดอร์ไม่ได้: {r.text[:120]}")
+                parent = f"{parent}/{part}"
             there = _listing(c, base, target)
             n = len(job["files"])
             for k, (name, src) in enumerate(job["files"]):
