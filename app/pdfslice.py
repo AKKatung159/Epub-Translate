@@ -21,6 +21,7 @@ import pypdfium2 as pdfium
 from PIL import Image
 
 from .xtc import H, W, Chapter, Writer, picture_tiles
+from .xtccover import cover_page
 
 log = logging.getLogger("pdfslice")
 
@@ -39,7 +40,9 @@ class Options:
     margin: int = 6             # px of white kept around the cropped content
     trim: bool = True           # drop running headers / page numbers (a lone short line at the very top/bottom)
     per_part: int = 600         # device pages per file; the X4 keeps a 16-byte entry per page in RAM
-    cover: bool = True          # a picture on PDF page 1 becomes a whole upright page (the X4's home thumbnail)
+    # every file starts with a cover page (the X4 shows a file's first page as its cover): a picture on PDF page 1,
+    # else a title page
+    cover: bool = True
 
 
 def ink_box(gray: np.ndarray) -> tuple[int, int, int, int] | None:
@@ -240,14 +243,17 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
             progress: Callable[[int, int, int], None] | None = None,
             should_stop: Callable[[], bool] | None = None) -> int:
     """Write dst (.xtch / .xtc), or "<stem> 01.xtc", "<stem> 02.xtc"... next to it when the book is longer than
-    o.per_part device pages. Returns the number of device pages."""
+    o.per_part device pages (plus a cover page each). Returns the number of device pages in all files."""
     pdf = pdfium.PdfDocument(str(src))
     try:
         n = len(pdf)
         meta = pdf.get_metadata_dict(skip_empty=True)
         marks = [(t, p) for t, p in outline(pdf) if 0 <= p < n] or text_marks(pdf)
         chapter_pages = {p for _, p in marks}
-        writer = Writer(o.depth)
+        title = title or meta.get("Title", "") or src.stem
+        author = meta.get("Author", "")
+        art = None                                             # the cover picture, when PDF page 1 is one
+        writer = Writer(o.depth, (lambda label: cover_page(art, title, author, o.depth, label)) if o.cover else None)
         flow = Flow(o, lambda img: writer.add(np.asarray(img, np.uint8)))
         first_of: list[int] = []                               # PDF page -> first device page
         for i in range(n):
@@ -258,9 +264,9 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
                 content = page_content(page, o)
             finally:
                 page.close()
-            if i == 0 and o.mode != "page" and o.cover and content is not None and is_cover(content):
-                first_of.append(len(writer))
-                writer.add(np.asarray(whole_page(content), np.uint8))   # cut into strips, a cover is a mess
+            if i == 0 and o.cover and content is not None and is_cover(content):
+                art = content                                  # the cover page of every file, not a page of text
+                first_of.append(0)
                 if progress:
                     progress(i + 1, n, len(writer))
                 continue
@@ -275,6 +281,8 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
             if progress:
                 progress(i + 1, n, len(writer))
         flow.flush()
+        if not len(writer) and art is not None:               # a one-page PDF that is only a picture
+            writer.add(np.asarray(whole_page(art), np.uint8))
         total = len(writer)
         if not total:
             raise ValueError("ไม่พบเนื้อหาใน PDF นี้ (หน้าว่างทั้งหมด?)")
@@ -294,8 +302,7 @@ def convert(src: Path, dst: Path, o: Options, title: str = "",
             """PDF pages shown on device pages s..e-1."""
             pages = [p for p, f in enumerate(first_of) if s <= f < e] or [0]
             return f"หน้า {pages[0] + 1}-{pages[-1] + 1}"
-        writer.save_parts(dst.parent, dst.stem, title or meta.get("Title", "") or src.stem, meta.get("Author", ""),
-                          chapters, o.per_part, page_label)
-        return total
+        files = writer.save_parts(dst.parent, dst.stem, title, author, chapters, o.per_part, page_label)
+        return total + (len(files) if o.cover else 0)
     finally:
         pdf.close()
