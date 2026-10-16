@@ -323,12 +323,18 @@ class Book:
         return out
 
     def build(self, translations: dict[tuple[str, str], str], *, bilingual: bool = False,
-              title_suffix: str = " (ฉบับแปลไทย)") -> bytes:
-        """translations: (doc, path) -> translated marked text. Segments without a translation stay English."""
+              title_suffix: str = " (ฉบับแปลไทย)", for_x4: bool = False) -> bytes:
+        """translations: (doc, path) -> translated marked text. Segments without a translation stay English.
+        for_x4: pictures become baseline greyscale JPEG/PNG that fit the X4's screen (see app/x4img.py)."""
         by_doc: dict[str, dict[str, str]] = {}
         for (doc, path), text in translations.items():
             by_doc.setdefault(doc, {})[path] = text
         files = dict(self.files)
+        if for_x4:
+            from .x4img import for_x4 as _picture_for_x4, is_picture
+            for name in list(files):
+                if is_picture(name):
+                    files[name] = _picture_for_x4(name, files[name])
 
         for doc in self.docs:
             root = parse_xml(self.files[doc])
