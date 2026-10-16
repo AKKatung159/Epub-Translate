@@ -307,8 +307,9 @@ def retranslate(jid: str, sid: int):
 
 # download -------------------------------------------------------------------------------------------------
 
-def thai_epub(j: dict, bilingual: bool | None = None) -> tuple[bytes, str]:
-    """The translated book (whatever is done so far) and a readable file name: "Name (ไทย).epub"."""
+def thai_epub(j: dict, bilingual: bool | None = None, for_x4: bool = False) -> tuple[bytes, str]:
+    """The translated book (whatever is done so far) and a readable file name: "Name (ไทย).epub".
+    for_x4: pictures reworked for the X4 (baseline grey JPEG/PNG fitted to 480x800)."""
     book = Book.load((job_dir(j["id"]) / "source.epub").read_bytes())
     tr = {(r["doc"], r["path"]): r["out"] for r in store.q(
         "SELECT doc, path, out FROM segments WHERE job_id=? AND status IN ('done','flagged') AND out IS NOT NULL",
@@ -317,7 +318,7 @@ def thai_epub(j: dict, bilingual: bool | None = None) -> tuple[bytes, str]:
     tag = "ไทย-อังกฤษ" if bi else "ไทย"
     if j["status"] != "done":
         tag += " บางส่วน"
-    return book.build(tr, bilingual=bi), f"{_safe_name(j['name'])} ({tag}).epub"
+    return book.build(tr, bilingual=bi, for_x4=for_x4), f"{_safe_name(j['name'])} ({tag}).epub"
 
 
 @app.get("/api/jobs/{jid}/download")
@@ -562,7 +563,7 @@ def x4_send(kind: str, oid: str):
         folder, named = pdfworker.device_files(d, _safe_name(d["name"]))
         title = d["name"]
     elif kind == "book":
-        data, fname = thai_epub(_job_or_404(oid))
+        data, fname = thai_epub(_job_or_404(oid), for_x4=True)
         named, folder, title = [(fname, data)], "", fname[:-5]
     else:
         raise HTTPException(404)
@@ -579,7 +580,7 @@ def opds_feed():
 
 @app.get("/opds/books/{jid}.epub")
 def opds_book(jid: str):
-    data, fname = thai_epub(_job_or_404(jid))
+    data, fname = thai_epub(_job_or_404(jid), for_x4=True)   # the OPDS catalog is for the X4
     ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
     return Response(data, media_type="application/epub+zip", headers={
         "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
