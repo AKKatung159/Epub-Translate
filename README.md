@@ -36,6 +36,25 @@ Jobs survive restarts and wait (with a message) when the model server is asleep;
 With `DISCORD_WEBHOOK_URL` set, Discord gets: glossary ready to review, 25 / 50 / 75 % (with ETA and readable
 chapters), done, no model server for 5 minutes (and back), errors.
 
+## PDF → Xteink X4 (menu "PDF → Xteink")
+
+Converts a PDF into an `.xtch` (4 greys) or `.xtc` (black/white) file for the Xteink X4 with the CrossPoint
+firmware, which cannot render PDF itself (ESP32-C3, ~380 KB RAM) but shows pre-rendered 480×800 pages instantly.
+No model involved; it runs on its own queue, so it never waits behind a translation.
+
+- **Landscape strips** (default): each page is rendered, running header and page number dropped, white margins
+  cropped, scaled to 800 px wide and cut into 480-px strips in the white gap between two lines (never through a
+  line when a gap exists). Strips flow across PDF pages so none is half empty; a chapter starts on a fresh strip.
+  Read with the device turned sideways: text ~1.67× larger than a whole page upright.
+- **At most 3 / 4 strips per page**: smaller text on big pages, fewer page turns. **Whole page**: pictures, forms.
+- PDF bookmarks become the chapter menu (top two levels); without bookmarks, one entry per 10 PDF pages.
+- Preview any device page in the browser and convert again with other options from the same upload.
+- Format written from the firmware's own parser (`lib/Xtc`): header 56 bytes, title/author, 96-byte chapter
+  records, page table, XTG/XTH pages (XTH: two bit planes, column-major from the right edge; 0 white, 1 dark grey,
+  2 light grey, 3 black). `tests/test_pdfxtc.py` decodes pages the way the firmware does.
+
+Speed: ~25 PDF pages per second (measured on the ROG Ally; the apps VM may be slower); an A5 novel page → ~2.4 device pages (~95 KB each in 4 greys).
+
 ## Models
 
 | Use | Model | Default name |
@@ -60,6 +79,7 @@ a 160k-character book takes ~1 h, a 800k-character novel ~5 h.
 | `MAX_UPLOAD_MB` | `100` | |
 | `TRANSLATE_PARALLEL` | `4` | chunks in flight (= llama-server `parallel`) |
 | `DISCORD_WEBHOOK_URL` | (empty = off) | notifications |
+| `MAX_PDF_MB` | `300` | PDF upload limit (streamed to disk) |
 | `PUBLIC_URL` | (empty) | e.g. `http://epub.lan`, makes the Discord titles links to the job |
 
 ## Run locally

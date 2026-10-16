@@ -28,6 +28,10 @@
       <span class="logo"><svg><use href="#i-book"/></svg></span>
       <span class="brand-text">แปลหนังสือ <span class="brand-sub">EPUB · อังกฤษ → ไทย</span></span>
     </a>
+    <nav class="modes" aria-label="เมนู">
+      <a href="#" data-view="books">แปลหนังสือ</a>
+      <a href="#pdf" data-view="pdf">PDF → Xteink</a>
+    </nav>
     <div id="health" class="pill" role="status">กำลังเช็กเครื่องโมเดล…</div>
   </div>
 </header>
@@ -64,6 +68,53 @@
     <div class="card jobs-card">
       <div class="card-head"><h2>งานแปล</h2></div>
       <div id="jobs"></div>
+    </div>
+  </section>
+
+  <!-- ======================================================================== pdf -> xteink -->
+  <section id="pdf-view" class="list-grid hidden">
+    <div class="card upload">
+      <h2>PDF → Xteink X4</h2>
+      <p class="hint">แปลง PDF เป็นไฟล์ที่ X4 เปิดได้ทันที แต่ละหน้าถูกหั่นเป็นแถบแนวนอน ตะแคงเครื่องอ่าน
+        ตัวหนังสือใหญ่ขึ้นราว 1.7 เท่า ตัดระหว่างบรรทัด ไม่ตัดกลางตัวอักษร และต่อเนื้อหาข้ามหน้าให้เต็มจอ</p>
+      <label id="pdf-drop" class="drop">
+        <input id="pdf-file" type="file" accept=".pdf,application/pdf" hidden>
+        <span class="drop-icon"><svg><use href="#i-upload"/></svg></span>
+        <span class="drop-title">ลากไฟล์ .pdf มาวาง</span>
+        <span class="drop-sub">หรือแตะเพื่อเลือกไฟล์</span>
+        <span id="pdf-name" class="file-name"></span>
+      </label>
+      <div class="opts" id="pdf-opts">
+        <label class="field">รูปแบบ
+          <select id="pdf-mode">
+            <option value="auto">แถบแนวนอน · ตัวใหญ่ที่สุด (แนะนำ)</option>
+            <option value="3">แถบแนวนอน · ไม่เกิน 3 แถบต่อหน้า</option>
+            <option value="4">แถบแนวนอน · ไม่เกิน 4 แถบต่อหน้า</option>
+            <option value="page">ทั้งหน้า แนวตั้ง (รูป สไลด์ ฟอร์ม)</option>
+          </select></label>
+        <label class="field">ทิศตะแคง
+          <select id="pdf-rotate">
+            <option value="cw">หมุนเครื่องทวนเข็มนาฬิกาเพื่ออ่าน</option>
+            <option value="ccw">หมุนเครื่องตามเข็มนาฬิกาเพื่ออ่าน</option>
+          </select></label>
+        <label class="field">สี
+          <select id="pdf-depth">
+            <option value="2">เทา 4 ระดับ (ตัวหนังสือเนียนกว่า)</option>
+            <option value="1">ขาวดำ (ไฟล์เล็กลงครึ่งหนึ่ง)</option>
+          </select></label>
+        <label class="switch"><input type="checkbox" id="pdf-trim" checked><span class="track"></span>
+          <span class="switch-text">ตัดหัวกระดาษและเลขหน้า<small>บรรทัดเดี่ยวสั้นๆ ที่ขอบบน/ล่างของทุกหน้า</small></span></label>
+      </div>
+      <div id="pdf-bar" class="bar hidden"><div></div></div>
+      <button id="pdf-upload" class="primary block" disabled>อัปโหลดและแปลง</button>
+      <div id="pdf-msg" class="msg"></div>
+    </div>
+
+    <div class="card jobs-card">
+      <div class="card-head"><h2>ไฟล์สำหรับ X4</h2></div>
+      <p class="hint">ได้ไฟล์ .xtch (หรือ .xtc ถ้าเลือกขาวดำ) ส่งเข้าเครื่องผ่าน File Transfer (Wi-Fi) หรือ SD card ·
+        สารบัญของ PDF กลายเป็นรายการบทในเมนูของเครื่อง</p>
+      <div id="pdfs"></div>
     </div>
   </section>
 

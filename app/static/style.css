@@ -328,3 +328,22 @@ td.del-cell button:hover { color: var(--bad); }
   #g-table td.count-cell { display: none; }
   #g-table td.del-cell { grid-column: 1 / -1; text-align: right; }
 }
+
+/* ------------------------------------------------------------------ menu + PDF -> Xteink */
+.modes { display: flex; gap: 4px; margin-left: auto; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 3px; }
+.modes a { padding: 6px 14px; border-radius: 999px; color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500; white-space: nowrap; }
+.modes a.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.chip[data-s=converting] { background: var(--info-soft); color: var(--info); }
+.pdf-item { cursor: default; }
+.pdf-item:hover { background: none; }
+.pdf-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.pdf-actions button { min-height: 36px; padding: 0 12px; font-size: 14px; }
+.pdf-panel { grid-column: 1 / -1; margin-top: 12px; display: grid; gap: 10px; }
+.pdf-panel img { width: 100%; max-width: 560px; border: 1px solid var(--line); border-radius: 8px; background: #fff; justify-self: center; }
+.pdf-panel .row { justify-content: center; }
+.pdf-panel select { min-width: 0; }
+@media (max-width: 640px) {
+  .modes { order: 3; width: 100%; justify-content: stretch; margin: 0; }
+  .modes a { flex: 1; text-align: center; }
+  .top-inner { flex-wrap: wrap; }
+}

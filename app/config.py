@@ -15,6 +15,7 @@ class Settings:
     translate_parallel: int = int(os.environ.get("TRANSLATE_PARALLEL", "4"))   # chunks in flight (= llama-server slots)
     max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "100"))
     max_glossary_terms: int = int(os.environ.get("MAX_GLOSSARY_TERMS", "400"))
+    max_pdf_mb: int = int(os.environ.get("MAX_PDF_MB", "300"))
     discord_webhook_url: str = os.environ.get("DISCORD_WEBHOOK_URL", "")       # empty = no notifications
     public_url: str = os.environ.get("PUBLIC_URL", "")                         # for links in notifications
 

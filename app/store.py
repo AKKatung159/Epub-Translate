@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS glossary (
 CREATE TABLE IF NOT EXISTS docs (
   job_id TEXT, doc TEXT, ord INTEGER, title TEXT, PRIMARY KEY (job_id, doc)
 );
+CREATE TABLE IF NOT EXISTS pdfs (
+  id TEXT PRIMARY KEY, name TEXT, created REAL, status TEXT, message TEXT DEFAULT '',
+  options TEXT DEFAULT '{}', pdf_pages INTEGER DEFAULT 0, done_pages INTEGER DEFAULT 0,
+  out_pages INTEGER DEFAULT 0, out_size INTEGER DEFAULT 0
+);
 """
 
 # character sheet columns, added to existing databases on start

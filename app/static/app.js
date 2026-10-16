@@ -138,6 +138,7 @@ let glossary = [], glossaryDirty = false;
 function openJob(id) {
   current = id; glossary = []; glossaryDirty = false;
   location.hash = id;
+  setView("books");
   $("#list-view").classList.add("hidden"); $("#job-view").classList.remove("hidden");
   window.scrollTo(0, 0);
   refreshJob().then(() => showTab(currentJob?.status === "done" || currentJob?.status === "translating" ? "preview" : "glossary"));
@@ -420,8 +421,149 @@ $("#s-delete").onclick = async () => {
   $("#back").click();
 };
 
+// ------------------------------------------------------------------------------------------- menu
+let view = "books";
+function setView(v) {
+  view = v;
+  document.querySelectorAll(".modes a").forEach((a) => a.classList.toggle("active", a.dataset.view === v));
+  $("#pdf-view").classList.toggle("hidden", v !== "pdf");
+  if (v === "pdf") { $("#list-view").classList.add("hidden"); $("#job-view").classList.add("hidden"); }
+}
+document.querySelectorAll(".modes a").forEach((a) => (a.onclick = (e) => {
+  e.preventDefault();
+  current = null;
+  document.title = "แปลหนังสือ EPUB";
+  if (a.dataset.view === "pdf") { location.hash = "pdf"; setView("pdf"); pdfSig = ""; loadPdfs(); }
+  else { location.hash = ""; setView("books"); $("#job-view").classList.add("hidden"); $("#list-view").classList.remove("hidden"); loadJobs(); }
+}));
+
+// ------------------------------------------------------------------------------------------- PDF -> Xteink
+const MODE_LABEL = { auto: "แถบแนวนอน", 3: "ไม่เกิน 3 แถบ/หน้า", 4: "ไม่เกิน 4 แถบ/หน้า", page: "ทั้งหน้า" };
+const PDF_STATUS = { queued: "รอคิว", converting: "กำลังแปลง", done: "พร้อมแล้ว", error: "ผิดพลาด", cancelled: "ยกเลิก" };
+let pdfPicked = null, pdfSig = "", pdfOpen = null;          // pdfOpen: {id, n} = preview panel shown
+
+function pdfPick(f) {
+  if (!f) return;
+  if (!/\.pdf$/i.test(f.name)) { $("#pdf-msg").textContent = "รองรับเฉพาะไฟล์ .pdf"; return; }
+  pdfPicked = f;
+  $("#pdf-name").textContent = `${f.name} (${(f.size / 1048576).toFixed(1)} MB)`;
+  $("#pdf-upload").disabled = false; $("#pdf-msg").textContent = "";
+}
+$("#pdf-file").onchange = (e) => pdfPick(e.target.files[0]);
+const pdrop = $("#pdf-drop");
+pdrop.ondragover = (e) => { e.preventDefault(); pdrop.classList.add("over"); };
+pdrop.ondragleave = () => pdrop.classList.remove("over");
+pdrop.ondrop = (e) => { e.preventDefault(); pdrop.classList.remove("over"); pdfPick(e.dataTransfer.files[0]); };
+
+$("#pdf-upload").onclick = () => {
+  if (!pdfPicked) return;
+  const fd = new FormData();
+  fd.append("file", pdfPicked);
+  fd.append("mode", $("#pdf-mode").value);
+  fd.append("rotate", $("#pdf-rotate").value);
+  fd.append("depth", $("#pdf-depth").value);
+  fd.append("trim", $("#pdf-trim").checked);
+  const bar = $("#pdf-bar"), msg = $("#pdf-msg");
+  bar.classList.remove("hidden"); msg.className = "msg"; msg.textContent = "กำลังอัปโหลด…";
+  $("#pdf-upload").disabled = true;
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/pdf");
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) bar.firstElementChild.style.width = (100 * e.loaded / e.total) + "%"; };
+  xhr.upload.onload = () => { bar.classList.add("indeterminate"); msg.textContent = "กำลังเปิดไฟล์…"; };
+  xhr.onload = () => {
+    bar.classList.add("hidden"); bar.classList.remove("indeterminate"); bar.firstElementChild.style.width = "0";
+    if (xhr.status === 200) {
+      msg.textContent = ""; pdfPicked = null; $("#pdf-name").textContent = ""; $("#pdf-file").value = "";
+      toast("อัปโหลดแล้ว กำลังแปลง"); pdfSig = ""; loadPdfs();
+    } else {
+      let d = xhr.statusText; try { d = JSON.parse(xhr.responseText).detail; } catch {}
+      msg.className = "msg err"; msg.textContent = d; $("#pdf-upload").disabled = false;
+    }
+  };
+  xhr.onerror = () => { msg.className = "msg err"; msg.textContent = "อัปโหลดไม่สำเร็จ"; $("#pdf-upload").disabled = false; };
+  xhr.send(fd);
+};
+
+const optSel = (cls, val, opts) => `<select class="${cls}">${opts.map(([v, l]) => `<option value="${v}" ${String(val) === String(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+
+async function loadPdfs() {
+  const items = await api("/api/pdf");
+  const sig = JSON.stringify([items, pdfOpen]);
+  if (sig === pdfSig) return;                       // nothing changed: keep the preview image as it is
+  if (document.activeElement?.closest?.("#pdfs select")) return;
+  pdfSig = sig;
+  const box = $("#pdfs");
+  if (!items.length) {
+    box.innerHTML = `<div class="empty">${icon("book")}<b>ยังไม่มีไฟล์</b><span>เพิ่ม PDF ทางซ้ายเพื่อแปลงให้ X4</span></div>`;
+    return;
+  }
+  box.innerHTML = items.map((d) => {
+    const o = d.options, pct = d.pdf_pages ? Math.round(100 * d.done_pages / d.pdf_pages) : 0;
+    const mb = d.out_size ? ` · ${(d.out_size / 1048576).toFixed(1)} MB` : "";
+    const meta = d.status === "done" ? `${d.pdf_pages} หน้า PDF → ${d.out_pages} หน้าจอ${mb} · ${MODE_LABEL[o.mode] || o.mode}${o.depth == 1 ? " · ขาวดำ" : ""}`
+      : `${d.pdf_pages} หน้า PDF · ${d.message || ""}`;
+    const open = pdfOpen?.id === d.id;
+    const panel = open && d.status === "done" ? `
+      <div class="pdf-panel">
+        <img src="/api/pdf/${d.id}/preview/${pdfOpen.n}" alt="ตัวอย่างหน้าจอ ${pdfOpen.n + 1}">
+        <div class="row"><button data-p="-1" aria-label="หน้าก่อน">‹</button><span class="muted small">หน้าจอ ${pdfOpen.n + 1}/${d.out_pages} · แสดงแบบตั้งตรงตามที่อ่าน</span><button data-p="1" aria-label="หน้าถัดไป">›</button></div>
+        <div class="row">
+          ${optSel("o-mode", o.mode, Object.entries(MODE_LABEL))}
+          ${optSel("o-rotate", o.rotate, [["cw", "หมุนทวนเข็ม"], ["ccw", "หมุนตามเข็ม"]])}
+          ${optSel("o-depth", o.depth, [["2", "เทา 4 ระดับ"], ["1", "ขาวดำ"]])}
+          <label class="small"><input type="checkbox" class="o-trim" ${o.trim ? "checked" : ""}> ตัดหัว/เลขหน้า</label>
+          <button data-a="redo">แปลงใหม่ด้วยค่านี้</button>
+        </div>
+      </div>` : "";
+    return `
+    <div class="job pdf-item" data-id="${d.id}">
+      <div class="job-title">${esc(d.name)}</div>
+      <div class="job-side"><span class="chip" data-s="${d.status}">${PDF_STATUS[d.status] || d.status}</span></div>
+      <div class="job-meta">${esc(meta)}</div>
+      ${["queued", "converting"].includes(d.status) ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}
+      <div class="pdf-actions">
+        ${d.status === "done" ? `<button class="primary" data-a="dl">${icon("download")}ดาวน์โหลด</button>
+          <button data-a="preview">${open ? "ซ่อนตัวอย่าง" : "ดูตัวอย่าง / ปรับ"}</button>` : ""}
+        ${d.status === "error" ? `<button data-a="retry">ลองใหม่</button>` : ""}
+        <button class="danger" data-a="del">ลบ</button>
+      </div>
+      ${panel}
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".pdf-item").forEach((el) => {
+    const d = items.find((x) => x.id === el.dataset.id);
+    el.querySelectorAll("[data-a]").forEach((b) => (b.onclick = () => pdfAction(d, b.dataset.a, el)));
+    el.querySelectorAll("[data-p]").forEach((b) => (b.onclick = () => {
+      pdfOpen.n = Math.min(d.out_pages - 1, Math.max(0, pdfOpen.n + +b.dataset.p)); loadPdfs();
+    }));
+  });
+}
+
+async function pdfAction(d, a, el) {
+  try {
+    if (a === "dl") { location.href = `/api/pdf/${d.id}/download`; return; }
+    if (a === "preview") { pdfOpen = pdfOpen?.id === d.id ? null : { id: d.id, n: 0 }; return loadPdfs(); }
+    if (a === "del") {
+      if (!confirm(`ลบ "${d.name}"?`)) return;
+      await api(`/api/pdf/${d.id}`, { method: "DELETE" });
+      if (pdfOpen?.id === d.id) pdfOpen = null;
+    }
+    if (a === "redo" || a === "retry") {
+      const o = a === "retry" ? d.options : {
+        mode: el.querySelector(".o-mode").value, rotate: el.querySelector(".o-rotate").value,
+        depth: +el.querySelector(".o-depth").value, trim: el.querySelector(".o-trim").checked,
+      };
+      await api(`/api/pdf/${d.id}/convert`, { method: "POST", body: JSON.stringify(o) });
+      if (a === "redo") pdfOpen = { id: d.id, n: 0 };
+      toast("กำลังแปลงใหม่");
+    }
+    loadPdfs();
+  } catch (e) { toast(e.message, "err"); }
+}
+
 // ------------------------------------------------------------------------------------------- loop
 health(); loadJobs();
-if (location.hash.length > 1) openJob(location.hash.slice(1));
-setInterval(() => (current ? refreshJob() : loadJobs()).catch(() => {}), 2000);
-setInterval(health, 15000);
+if (location.hash === "#pdf") { setView("pdf"); loadPdfs(); }
+else if (location.hash.length > 1) openJob(location.hash.slice(1));
+else setView("books");
+setInterval(() => (current ? refreshJob() : view === "pdf" ? loadPdfs() : loadJobs()).catch(() => {}), 2000);

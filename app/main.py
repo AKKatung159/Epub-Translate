@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import shutil
@@ -15,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import llm, worker
+from . import llm, pdfworker, worker
 from .config import settings
 from .epub import TAG_RE, Book, check_tags
 from .store import GLOSSARY_COLS, job_dir, store
@@ -28,6 +29,7 @@ log = logging.getLogger("api")
 @asynccontextmanager
 async def lifespan(_app):
     worker.start()
+    pdfworker.start()
     yield
 
 
@@ -315,6 +317,128 @@ def download(jid: str, bilingual: bool | None = None):
     ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
     return Response(data, media_type="application/epub+zip", headers={
         "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
+
+
+# PDF -> Xteink X4 -------------------------------------------------------------------------------------------
+
+def _pdf_summary(d: dict) -> dict:
+    return {k: d[k] for k in ("id", "name", "created", "status", "message", "options", "pdf_pages", "done_pages",
+                              "out_pages", "out_size")}
+
+
+def _pdf_or_404(pid: str) -> dict:
+    d = pdfworker.row(pid)
+    if not d:
+        raise HTTPException(404, "no such PDF")
+    return d
+
+
+class PdfOptions(BaseModel):
+    mode: str = "auto"
+    rotate: str = "cw"
+    depth: int = 2
+    trim: bool = True
+
+    def checked(self) -> dict:
+        from .pdfslice import MODES
+        if self.mode not in MODES or self.rotate not in ("cw", "ccw") or self.depth not in (1, 2):
+            raise HTTPException(400, "ตัวเลือกไม่ถูกต้อง")
+        return self.model_dump()
+
+
+@app.get("/api/pdf")
+def list_pdfs():
+    return [_pdf_summary(d) for d in pdfworker.rows()]
+
+
+@app.post("/api/pdf")
+def create_pdf(file: UploadFile = File(...), mode: str = Form("auto"), rotate: str = Form("cw"),
+               depth: int = Form(2), trim: bool = Form(True)):
+    import pypdfium2 as pdfium
+    opts = PdfOptions(mode=mode, rotate=rotate, depth=depth, trim=trim).checked()
+    name = re.sub(r"\.pdf$", "", file.filename or "document", flags=re.I)
+    tmp = settings.data_dir / "pdf" / f"upload-{time.time_ns()}.pdf"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(tmp, "wb") as f:                     # streamed to disk: big scans never sit in RAM
+            shutil.copyfileobj(file.file, f, 1 << 20)
+        if tmp.stat().st_size > settings.max_pdf_mb * 1024 * 1024:
+            raise HTTPException(413, f"ไฟล์ใหญ่เกิน {settings.max_pdf_mb} MB")
+        try:
+            doc = pdfium.PdfDocument(str(tmp))
+            pages = len(doc)
+            doc.close()
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, f"เปิด PDF ไม่ได้ (เสียหายหรือมีรหัสผ่าน?): {e}") from e
+        pid = pdfworker.new(name, pages, opts)
+        tmp.replace(pdfworker.pdf_dir(pid) / "source.pdf")
+    finally:
+        tmp.unlink(missing_ok=True)
+    pdfworker.wake.set()
+    return _pdf_summary(pdfworker.row(pid))
+
+
+@app.post("/api/pdf/{pid}/convert")
+def reconvert_pdf(pid: str, o: PdfOptions):
+    """Same PDF, other options (try "at most 3 strips", the other rotation, black and white...)."""
+    d = _pdf_or_404(pid)
+    if d["status"] == "converting":
+        raise HTTPException(409, "กำลังแปลงอยู่")
+    store.x("UPDATE pdfs SET options=?, status='queued', message='รอคิว' WHERE id=?",
+            (json.dumps(o.checked()), pid))
+    pdfworker.wake.set()
+    return _pdf_summary(pdfworker.row(pid))
+
+
+@app.delete("/api/pdf/{pid}")
+def delete_pdf(pid: str):
+    _pdf_or_404(pid)
+    store.x("UPDATE pdfs SET status='cancelled' WHERE id=?", (pid,))
+    time.sleep(0.3)
+    store.x("DELETE FROM pdfs WHERE id=?", (pid,))
+    shutil.rmtree(pdfworker.pdf_dir(pid), ignore_errors=True)
+    return {"ok": True}
+
+
+@app.get("/api/pdf/{pid}/download")
+def download_pdf(pid: str):
+    d = _pdf_or_404(pid)
+    path = pdfworker.output(d)
+    if d["status"] != "done" or not path.exists():
+        raise HTTPException(409, "ยังแปลงไม่เสร็จ")
+    fname = re.sub(r"[\\/:*?\"<>|]+", "_", d["name"])[:120] + path.suffix
+    ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
+    return FileResponse(path, media_type="application/octet-stream", headers={
+        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
+
+
+@app.get("/api/pdf/{pid}/preview/{n}")
+def preview_pdf(pid: str, n: int):
+    """Device page n as PNG, turned upright the way it is read (what the X4 will show)."""
+    import io
+    from PIL import Image
+    from .xtc import decode_page
+    d = _pdf_or_404(pid)
+    path = pdfworker.output(d)
+    if d["status"] != "done" or not path.exists():
+        raise HTTPException(409, "ยังแปลงไม่เสร็จ")
+    with open(path, "rb") as f:
+        head = f.read(56)
+        count = int.from_bytes(head[6:8], "little")
+        if not 0 <= n < count:
+            raise HTTPException(404, "ไม่มีหน้านี้")
+        table = int.from_bytes(head[0x18:0x20], "little")
+        f.seek(table + 16 * n)
+        entry = f.read(16)
+        off, size = int.from_bytes(entry[:8], "little"), int.from_bytes(entry[8:12], "little")
+        f.seek(off)
+        data = f.read(size)
+    img = Image.fromarray(decode_page(data, int(d["options"].get("depth", 2))))
+    if d["options"].get("mode") != "page":
+        img = img.transpose(Image.ROTATE_90 if d["options"].get("rotate", "cw") == "cw" else Image.ROTATE_270)
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return Response(buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 def _versioned_index() -> str:
