@@ -374,3 +374,15 @@ td.del-cell button:hover { color: var(--bad); }
 .q-item[data-s=error] .q-meta { color: var(--bad); }
 .q-item[data-s=done] .q-meta { color: var(--ok); }
 .q-item .bar { margin-top: 6px; height: 4px; }
+
+/* ============================================================================ library */
+.lib-search { max-width: none; margin: 8px 0 4px; }
+.lib-search input { width: 100%; padding-left: 34px; }
+.lib-item { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 14px; padding: 14px 4px; border-top: 1px solid var(--line-2); }
+.lib-item:first-child { border-top: 0; }
+.lib-cover { width: 64px; height: 96px; border-radius: 6px; overflow: hidden; background: var(--line-2); border: 1px solid var(--line);
+             display: grid; place-items: center; color: var(--muted); }
+.lib-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lib-cover svg { width: 26px; height: 26px; }
+.lib-body { min-width: 0; }
+.lib-body .pdf-actions { margin-top: 8px; }

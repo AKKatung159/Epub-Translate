@@ -30,6 +30,7 @@
     </a>
     <nav class="modes" aria-label="เมนู">
       <a href="#" data-view="books">แปลหนังสือ</a>
+      <a href="#library" data-view="library">คลังหนังสือ</a>
       <a href="#pdf" data-view="pdf">PDF → Xteink</a>
     </nav>
     <div id="health" class="pill" role="status">กำลังเช็กเครื่องโมเดล…</div>
@@ -68,6 +69,33 @@
     <div class="card jobs-card">
       <div class="card-head"><h2>งานแปล</h2></div>
       <div id="jobs"></div>
+    </div>
+  </section>
+
+  <!-- ======================================================================== library -->
+  <section id="library-view" class="list-grid hidden">
+    <div class="card upload">
+      <h2>คลังหนังสือ</h2>
+      <p class="hint">เก็บไฟล์ EPUB ที่มีอยู่แล้ว (เช่นหนังสือภาษาไทย) ไว้ที่นี่โดยไม่ต้องแปล
+        หนังสือจะขึ้นใน OPDS หมวด "คลังหนังสือ" ให้ X4 โหลดได้ รูปถูกปรับเป็นสีเทาขนาดพอดีจอตอนส่งเข้าเครื่อง</p>
+      <label id="lib-drop" class="drop">
+        <input id="lib-file" type="file" accept=".epub,application/epub+zip" multiple hidden>
+        <span class="drop-icon"><svg><use href="#i-upload"/></svg></span>
+        <span class="drop-title">ลากไฟล์ .epub มาวาง</span>
+        <span class="drop-sub">หรือแตะเพื่อเลือก · ได้หลายไฟล์พร้อมกัน</span>
+        <span id="lib-name" class="file-name"></span>
+      </label>
+      <div id="lib-bar" class="bar hidden"><div></div></div>
+      <button id="lib-upload" class="primary block" disabled>เพิ่มเข้าคลัง</button>
+      <div id="lib-msg" class="msg"></div>
+      <p class="hint">บน X4 ตั้ง OPDS เป็น <code class="opds-url"></code> แล้วเลือกหมวด "คลังหนังสือ"
+        หรือกด "ส่งเข้า X4" ขณะเปิดหน้า File Transfer บนเครื่อง</p>
+    </div>
+
+    <div class="card jobs-card">
+      <div class="card-head"><h2>หนังสือในคลัง</h2><small id="lib-count"></small></div>
+      <label class="search lib-search hidden" id="lib-search-box"><svg><use href="#i-search"/></svg><input id="lib-search" placeholder="ค้นหาชื่อหรือผู้แต่ง…" type="search"></label>
+      <div id="library"></div>
     </div>
   </section>
 
@@ -121,7 +149,7 @@
         <button id="x4-all" class="block">ส่งทุกไฟล์ที่แปลงเสร็จเข้า X4</button>
         <div id="x4-queue" class="x4-queue"></div>
         <p class="hint">กด "ส่งเข้า X4" ได้เมื่อเปิดหน้า File Transfer บนเครื่องค้างไว้ ไฟล์ไปอยู่ในโฟลเดอร์ Books ·
-          หนังสือแปลไทย (EPUB) โหลดจากเครื่องได้เองผ่าน OPDS: บน X4 ตั้ง OPDS เป็น <code id="opds-url"></code></p>
+          หนังสือแปลไทย (EPUB) โหลดจากเครื่องได้เองผ่าน OPDS: บน X4 ตั้ง OPDS เป็น <code class="opds-url"></code></p>
       </div>
       <div id="pdfs"></div>
     </div>
