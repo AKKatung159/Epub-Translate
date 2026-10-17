@@ -432,13 +432,15 @@ function setView(v) {
   view = v;
   document.querySelectorAll(".modes a").forEach((a) => a.classList.toggle("active", a.dataset.view === v));
   $("#pdf-view").classList.toggle("hidden", v !== "pdf");
-  if (v === "pdf") { $("#list-view").classList.add("hidden"); $("#job-view").classList.add("hidden"); }
+  $("#library-view").classList.toggle("hidden", v !== "library");
+  if (v !== "books") { $("#list-view").classList.add("hidden"); $("#job-view").classList.add("hidden"); }
 }
 document.querySelectorAll(".modes a").forEach((a) => (a.onclick = (e) => {
   e.preventDefault();
   current = null;
   document.title = "แปลหนังสือ EPUB";
   if (a.dataset.view === "pdf") { location.hash = "pdf"; setView("pdf"); pdfSig = ""; loadPdfs(); checkX4(); }
+  else if (a.dataset.view === "library") { location.hash = "library"; setView("library"); libSig = ""; loadLibrary(); }
   else { location.hash = ""; setView("books"); $("#job-view").classList.add("hidden"); $("#list-view").classList.remove("hidden"); loadJobs(); }
 }));
 
@@ -586,6 +588,125 @@ async function pdfAction(d, a, el) {
   } catch (e) { toast(e.message, "err"); }
 }
 
+// ------------------------------------------------------------------------------------------- library
+let libPicked = [], libSig = "";
+const fmtMB = (n) => `${(n / 1048576).toFixed(1)} MB`;
+
+function libPick(list) {
+  const files = [...(list || [])];
+  const ok = files.filter((f) => /\.epub$/i.test(f.name));
+  $("#lib-msg").className = "msg";
+  $("#lib-msg").textContent = ok.length < files.length ? `ข้าม ${files.length - ok.length} ไฟล์ที่ไม่ใช่ .epub` : "";
+  if (!ok.length) return;
+  libPicked = ok;
+  const total = ok.reduce((n, f) => n + f.size, 0);
+  $("#lib-name").textContent = ok.length === 1 ? `${ok[0].name} (${fmtMB(total)})` : `${ok.length} ไฟล์ (${fmtMB(total)})`;
+  $("#lib-upload").disabled = false;
+}
+$("#lib-file").onchange = (e) => libPick(e.target.files);
+const ldrop = $("#lib-drop");
+ldrop.ondragover = (e) => { e.preventDefault(); ldrop.classList.add("over"); };
+ldrop.ondragleave = () => ldrop.classList.remove("over");
+ldrop.ondrop = (e) => { e.preventDefault(); ldrop.classList.remove("over"); libPick(e.dataTransfer.files); };
+
+// one request per file: a progress bar that means something, and one bad file does not stop the rest
+function libSend(file, onProgress) {
+  return new Promise((resolve) => {
+    const fd = new FormData();
+    fd.append("files", file);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/library");
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
+    xhr.onload = () => {
+      if (xhr.status === 200) return resolve({ ok: true });
+      let d = xhr.statusText; try { d = JSON.parse(xhr.responseText).detail; } catch {}
+      resolve({ ok: false, error: d });
+    };
+    xhr.onerror = () => resolve({ ok: false, error: "อัปโหลดไม่สำเร็จ" });
+    xhr.send(fd);
+  });
+}
+$("#lib-upload").onclick = async () => {
+  if (!libPicked.length) return;
+  const files = libPicked, total = files.reduce((n, f) => n + f.size, 0) || 1;
+  const bar = $("#lib-bar"), msg = $("#lib-msg");
+  bar.classList.remove("hidden"); msg.className = "msg"; $("#lib-upload").disabled = true;
+  let done = 0, added = 0;
+  const failed = [];
+  for (const [k, f] of files.entries()) {
+    msg.textContent = files.length > 1 ? `กำลังอัปโหลด ${k + 1}/${files.length}: ${f.name}` : "กำลังอัปโหลด…";
+    const r = await libSend(f, (n) => (bar.firstElementChild.style.width = (100 * (done + n) / total) + "%"));
+    done += f.size;
+    if (r.ok) added++; else failed.push(`${f.name}: ${r.error}`);
+    libSig = ""; loadLibrary();
+  }
+  bar.classList.add("hidden"); bar.firstElementChild.style.width = "0";
+  libPicked = []; $("#lib-name").textContent = ""; $("#lib-file").value = "";
+  if (failed.length) { msg.className = "msg err"; msg.textContent = failed.join(" · "); } else msg.textContent = "";
+  if (added) toast(`เพิ่มเข้าคลังแล้ว ${added} เล่ม`);
+};
+$("#lib-search").oninput = () => { libSig = ""; loadLibrary(); };
+
+async function loadLibrary() {
+  const items = await api("/api/library");
+  await refreshSends();
+  const q = $("#lib-search").value.trim().toLowerCase();
+  const mine = Object.fromEntries(Object.entries(x4Sends).filter(([k]) => k.startsWith("library:")));
+  const sig = JSON.stringify([items, q, mine]);
+  if (sig === libSig) return;
+  libSig = sig;
+  $("#lib-count").textContent = items.length ? `${items.length} เล่ม · ${fmtMB(items.reduce((n, d) => n + d.size, 0))}` : "";
+  $("#lib-search-box").classList.toggle("hidden", items.length < 8);
+  const box = $("#library");
+  if (!items.length) {
+    box.innerHTML = `<div class="empty">${icon("book")}<b>ยังไม่มีหนังสือในคลัง</b><span>เพิ่มไฟล์ .epub ทางซ้าย</span></div>`;
+    return;
+  }
+  const shown = q ? items.filter((d) => `${d.name} ${d.author}`.toLowerCase().includes(q)) : items;
+  if (!shown.length) { box.innerHTML = `<div class="empty"><b>ไม่พบ "${esc(q)}"</b></div>`; return; }
+  const date = (t) => new Date(t * 1000).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+  box.innerHTML = shown.map((d) => `
+    <div class="lib-item" data-id="${d.id}">
+      <div class="lib-cover">${d.cover ? `<img src="/api/library/${d.id}/cover" alt="" loading="lazy">` : icon("book")}</div>
+      <div class="lib-body">
+        <div class="job-title" title="${esc(d.name)}">${esc(d.name)}</div>
+        <div class="job-meta">${esc(d.author || "ไม่ระบุผู้แต่ง")}</div>
+        <div class="job-meta">${fmtMB(d.size)} · เพิ่มเมื่อ ${date(d.created)}</div>
+        <div class="pdf-actions">
+          <button data-a="x4">${x4Label(`library:${d.id}`)}</button>
+          <button data-a="dl">${icon("download")}ดาวน์โหลด</button>
+          <button data-a="rename">แก้ชื่อ</button>
+          <button class="danger" data-a="del">ลบ</button>
+        </div>
+      </div>
+    </div>`).join("");
+  box.querySelectorAll(".lib-item").forEach((el) => {
+    const d = items.find((x) => x.id === el.dataset.id);
+    el.querySelectorAll("[data-a]").forEach((b) => (b.onclick = () => libAction(d, b.dataset.a)));
+  });
+}
+
+async function libAction(d, a) {
+  try {
+    if (a === "dl") { location.href = `/api/library/${d.id}/download`; return; }
+    if (a === "x4") return sendX4("library", d.id);
+    if (a === "rename") {
+      const name = prompt("ชื่อหนังสือ (ใช้เป็นชื่อบน X4 ด้วย)", d.name);
+      if (name === null) return;
+      const author = prompt("ผู้แต่ง", d.author || "");
+      if (author === null) return;
+      await api(`/api/library/${d.id}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() || d.name, author }) });
+      toast("บันทึกแล้ว");
+    }
+    if (a === "del") {
+      if (!confirm(`ลบ "${d.name}" ออกจากคลัง?`)) return;
+      await api(`/api/library/${d.id}`, { method: "DELETE" });
+      toast("ลบแล้ว");
+    }
+    libSig = ""; loadLibrary();
+  } catch (e) { toast(e.message, "err"); }
+}
+
 // ------------------------------------------------------------------------------------------- send to X4
 let x4Sends = {};
 async function refreshSends() { try { x4Sends = await api("/api/x4/sends"); } catch { x4Sends = {}; } }
@@ -612,7 +733,7 @@ function watchQueue() {
   queueTimer = setInterval(async () => {
     await refreshSends();
     renderQueue();
-    if (view === "pdf") { pdfSig = ""; loadPdfs(); } else if (current) refreshJob();
+    if (view === "pdf") { pdfSig = ""; loadPdfs(); } else if (view === "library") { libSig = ""; loadLibrary(); } else if (current) refreshJob();
     for (const [k, s] of Object.entries(x4Sends)) {       // tell once when an item finishes
       if (queueSeen[k] && queueSeen[k] !== s.state && ["done", "error"].includes(s.state)) toast(`${s.title}: ${s.message}`, s.state === "error" ? "err" : "");
       queueSeen[k] = s.state;
@@ -671,11 +792,12 @@ $("#x4-check").onclick = async () => {
   if (addr) await api("/api/x4", { method: "PUT", body: JSON.stringify({ address: addr }) });
   checkX4();
 };
-$("#opds-url").textContent = `${location.protocol}//${location.host}/opds`;
+document.querySelectorAll(".opds-url").forEach((el) => (el.textContent = `${location.protocol}//${location.host}/opds`));
 
 // ------------------------------------------------------------------------------------------- loop
 health(); loadJobs();
 if (location.hash === "#pdf") { setView("pdf"); loadPdfs(); checkX4(); }
+else if (location.hash === "#library") { setView("library"); loadLibrary(); }
 else if (location.hash.length > 1) openJob(location.hash.slice(1));
 else setView("books");
-setInterval(() => (current ? refreshJob() : view === "pdf" ? loadPdfs() : loadJobs()).catch(() => {}), 2000);
+setInterval(() => (current ? refreshJob() : view === "pdf" ? loadPdfs() : view === "library" ? loadLibrary() : loadJobs()).catch(() => {}), 2000);

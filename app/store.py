@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS pdfs (
   options TEXT DEFAULT '{}', pdf_pages INTEGER DEFAULT 0, done_pages INTEGER DEFAULT 0,
   out_pages INTEGER DEFAULT 0, out_size INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS library (
+  id TEXT PRIMARY KEY, name TEXT, author TEXT DEFAULT '', created REAL, size INTEGER DEFAULT 0,
+  file_name TEXT DEFAULT '', cover INTEGER DEFAULT 0
+);
 """
 
 # character sheet columns, added to existing databases on start

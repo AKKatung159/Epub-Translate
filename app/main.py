@@ -506,6 +506,88 @@ def preview_pdf(pid: str, n: int):
     return Response(buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
+# library: ready-made EPUBs, no translation ------------------------------------------------------------------
+
+def _lib_or_404(bid: str) -> dict:
+    from . import library
+    d = library.row(bid)
+    if not d:
+        raise HTTPException(404, "ไม่มีหนังสือเล่มนี้")
+    return d
+
+
+@app.get("/api/library")
+def list_library():
+    from . import library
+    return library.rows()
+
+
+@app.post("/api/library")
+def add_library(files: list[UploadFile] = File(...)):
+    """One or more EPUBs; each answer row has either the book or an error for that file."""
+    from . import library
+    out = []
+    for file in files:
+        fname = file.filename or "book.epub"
+        tmp = library.lib_dir() / f"upload-{time.time_ns()}.tmp"
+        try:
+            with open(tmp, "wb") as f:
+                shutil.copyfileobj(file.file, f, 1 << 20)
+            if tmp.stat().st_size > settings.max_upload_mb * 1024 * 1024:
+                raise library.BadEpub(f"ไฟล์ใหญ่เกิน {settings.max_upload_mb} MB")
+            out.append({"file": fname, "book": library.add(tmp, fname)})
+        except library.BadEpub as e:
+            out.append({"file": fname, "error": str(e)})
+        finally:
+            tmp.unlink(missing_ok=True)
+    if len(out) == 1 and "error" in out[0]:
+        raise HTTPException(400, out[0]["error"])
+    return out
+
+
+class LibPatch(BaseModel):
+    name: str | None = None
+    author: str | None = None
+
+
+@app.patch("/api/library/{bid}")
+def patch_library(bid: str, p: LibPatch):
+    from . import library
+    _lib_or_404(bid)
+    return library.update(bid, p.name, p.author)
+
+
+@app.delete("/api/library/{bid}")
+def delete_library(bid: str):
+    from . import library
+    _lib_or_404(bid)
+    library.delete(bid)
+    return {"ok": True}
+
+
+@app.get("/api/library/{bid}/cover")
+def library_cover(bid: str):
+    from . import library
+    f = library.lib_dir() / f"{_lib_or_404(bid)['id']}.jpg"
+    if not f.exists():
+        raise HTTPException(404, "ไม่มีปก")
+    return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
+
+@app.get("/api/library/{bid}/download")
+def download_library(bid: str):
+    """The file exactly as uploaded."""
+    from . import library
+    d = _lib_or_404(bid)
+    return _attachment(library.path(bid), f"{_safe_name(d['name'])}.epub", "application/epub+zip")
+
+
+def library_epub(bid: str) -> tuple[bytes, str]:
+    from . import library
+    d = _lib_or_404(bid)
+    return library.x4_epub(d), f"{_safe_name(d['name'])}.epub"
+
+
 # send to the X4 ---------------------------------------------------------------------------------------------
 
 class X4Address(BaseModel):
@@ -553,7 +635,8 @@ def x4_set(a: X4Address):
 
 @app.post("/api/x4/send/{kind}/{oid}")
 def x4_send(kind: str, oid: str):
-    """kind "pdf": all parts of a PDF conversion; kind "book": the Thai EPUB of a translation job."""
+    """kind "pdf": all parts of a PDF conversion; kind "book": the Thai EPUB of a translation job;
+    kind "library": a book from the library."""
     from . import x4
     if kind == "pdf":
         d = _pdf_or_404(oid)
@@ -565,6 +648,9 @@ def x4_send(kind: str, oid: str):
     elif kind == "book":
         data, fname = thai_epub(_job_or_404(oid), for_x4=True)
         named, folder, title = [(fname, data)], "", fname[:-5]
+    elif kind == "library":
+        data, fname = library_epub(oid)
+        named, folder, title = [(fname, data)], "", fname[:-5]
     else:
         raise HTTPException(404)
     return x4.enqueue(f"{kind}:{oid}", title, named, folder)
@@ -572,18 +658,42 @@ def x4_send(kind: str, oid: str):
 
 # OPDS (e-readers on the LAN) ---------------------------------------------------------------------------------
 
+OPDS_TYPE = "application/atom+xml;profile=opds-catalog;charset=utf-8"
+
+
 @app.get("/opds")
 def opds_feed():
+    """Start of the catalog: two sections, translated books and the library."""
     from . import opds
-    return Response(opds.feed(), media_type="application/atom+xml;profile=opds-catalog;charset=utf-8")
+    return Response(opds.root(), media_type=OPDS_TYPE)
+
+
+@app.get("/opds/translated")
+def opds_translated():
+    from . import opds
+    return Response(opds.feed(), media_type=OPDS_TYPE)
+
+
+@app.get("/opds/library")
+def opds_library(page: int = 1):
+    from . import opds
+    return Response(opds.library_feed(page), media_type=OPDS_TYPE)
+
+
+def _epub_response(data: bytes, fname: str) -> Response:
+    ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
+    return Response(data, media_type="application/epub+zip", headers={
+        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
 
 
 @app.get("/opds/books/{jid}.epub")
 def opds_book(jid: str):
-    data, fname = thai_epub(_job_or_404(jid), for_x4=True)   # the OPDS catalog is for the X4
-    ascii_name = re.sub(r"[^A-Za-z0-9\-_. ]+", "_", fname)
-    return Response(data, media_type="application/epub+zip", headers={
-        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
+    return _epub_response(*thai_epub(_job_or_404(jid), for_x4=True))   # the OPDS catalog is for the X4
+
+
+@app.get("/opds/library/{bid}.epub")
+def opds_library_book(bid: str):
+    return _epub_response(*library_epub(bid))
 
 
 def _versioned_index() -> str:
